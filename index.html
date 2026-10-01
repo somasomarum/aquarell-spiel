@@ -28,7 +28,7 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
 h1{font-family:var(--display);font-weight:700;font-size:1.9rem;margin:0;line-height:1;letter-spacing:.01em}
 h1 span{color:var(--blau);filter:brightness(1.4)}
 .ver{font:600 .72rem var(--body);color:var(--muted);opacity:.75;margin-left:8px;letter-spacing:.02em;cursor:help;font-variant-numeric:tabular-nums}
-.score{display:flex;align-items:baseline;gap:12px;font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem}
+.score{display:flex;align-items:baseline;gap:12px;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem}
 .stars{font-size:1.3rem;letter-spacing:.1em;color:var(--chip-line)}
 .stars b{color:var(--accent);font-weight:400}
 .stage{position:relative;flex:1;min-height:0}
@@ -44,11 +44,31 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 .meter{width:46px;height:6px;border-radius:3px;background:var(--chip-line);overflow:hidden}
 .meter i{display:block;height:100%;background:var(--ink);width:100%}
 .count{font-variant-numeric:tabular-nums;color:var(--muted)}
-.hint{font-family:var(--display);color:var(--muted);text-align:center;font-size:1rem;margin:0;padding-bottom:2px}
 .sep{width:1px;background:var(--chip-line);margin-inline:2px}
-.visc{display:flex;align-items:center;justify-content:center;gap:10px;padding-top:6px;font:600 .8rem var(--body);color:var(--muted)}
-.visc input{width:min(260px,55vw);accent-color:var(--accent)}
-@media (max-width:480px){.tools{gap:5px}.tools button{padding:6px 8px;font-size:.8rem;gap:5px;min-height:38px}.tools .rot{padding-inline:10px}.meter{width:26px}}
+.tools .gear{font-size:1.15rem;padding-inline:12px}
+@media (max-width:480px){
+  .tools{gap:5px;flex-wrap:nowrap}.tools button{padding:6px 8px;font-size:.8rem;gap:4px;min-height:40px;min-width:0}.meter{width:18px}
+  h1{font-size:1.5rem}.score{font-size:.78rem;gap:6px}.stars{font-size:1.05rem}header{flex-wrap:nowrap;align-items:center}.ver{margin-left:5px}}
+@media (hover:none){.keys{display:none}}
+/* Einstellungen: Blatt, das von unten über das Spielfeld fährt */
+.sheet{position:fixed;inset:0;z-index:5}
+.sheet[hidden]{display:none}
+.sheet-back{position:absolute;inset:0;background:rgba(20,12,8,.45)}
+.sheet-card{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:min(440px,100%);box-sizing:border-box;
+  background:var(--chip);border:1.5px solid var(--chip-line);border-bottom:0;border-radius:16px 16px 0 0;
+  padding:12px 16px calc(14px + env(safe-area-inset-bottom));box-shadow:0 -10px 30px rgba(0,0,0,.45);animation:up .22s ease-out}
+@keyframes up{from{transform:translate(-50%,30px);opacity:.4}}
+@media (prefers-reduced-motion:reduce){.sheet-card{animation:none}}
+.sheet-head{display:flex;justify-content:space-between;align-items:center;font-family:var(--display);font-size:1.3rem;padding-bottom:4px}
+.sheet button{font:600 .9rem var(--body);color:var(--ink);background:var(--table);border:1.5px solid var(--chip-line);border-radius:10px;padding:8px 12px;min-height:40px;cursor:pointer}
+.sheet button[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.sheet button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#menuClose{background:none;border:0;font-size:1.1rem;min-height:36px;padding:4px 8px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:8px;border-top:1px solid rgba(107,81,64,.5);color:var(--muted);font-size:.9rem}
+.row[hidden]{display:none}
+.visc{display:flex;align-items:center;gap:8px;color:var(--muted)}
+.visc input{width:min(170px,40vw);accent-color:var(--accent)}
+.keys{color:var(--muted);font-size:.75rem;opacity:.8;margin:8px 0 0;line-height:1.4}
 #toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--paper);color:#2a2026;
   font-family:var(--display);font-size:1.2rem;padding:6px 16px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.4);
   transition:opacity .4s;opacity:0;pointer-events:none;z-index:3}
@@ -59,28 +79,33 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
     <h1>Aqua<span>rell</span><small class="ver" id="ver"></small></h1>
     <div class="score"><span id="filled">0 / 0 Formen gefüllt</span><span class="stars" id="stars" aria-label="Sterne">★★★</span></div>
   </header>
-  <p class="hint" id="hint">Zieh am Blatt, um es zu kippen: Der Trichter oben gießt, der Strahl folgt der Neigung. Die Farbkleckse zeigen die Zielfarbe.</p>
   <div class="stage" id="stage"><canvas id="paper"></canvas><div id="toast"></div></div>
-  <div class="visc"><span>Wasser</span><input type="range" id="visc" min="0" max="4" step="0.05" value="2.1" aria-label="Zähigkeit: Wasser bis Honig"><span>Honig</span></div>
   <div class="tools">
-    <button class="rot" id="rotL" title="Halten: gegen den Uhrzeigersinn drehen (Q)" aria-label="Nach links drehen">⟲</button>
     <button id="toolTurn" aria-pressed="true" title="Drehen: Blatt mit dem Finger oder der Maus kippen (D)">Drehen</button>
     <button id="toolPen" aria-pressed="false" title="Stift: eigene Linien (begrenzte Tinte)">Stift <span class="meter"><i id="inkBar"></i></span></button>
     <button id="toolErase" aria-pressed="false" title="Radierer: Lücken in Linien radieren">Radierer <span class="count" id="eraseCount">7</span></button>
     <button id="undo" title="Letzten Strich zurücknehmen (Z)">Zurück</button>
-    <button id="restart" title="Blatt neu beginnen">Neu</button>
-    <button id="tiltBtn" aria-pressed="false" hidden title="iPhone/Handy neigen statt ziehen">Neigen</button>
-    <button id="fluidBtn" aria-pressed="true" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: flüssig</button>
-    <button id="zen" aria-pressed="false" title="Unbegrenzt Wasser, Tinte und Radierer">Zen</button>
-    <button class="rot" id="rotR" title="Halten: im Uhrzeigersinn drehen (E)" aria-label="Nach rechts drehen">⟳</button>
+    <button id="menuBtn" class="gear" aria-expanded="false" aria-controls="menu" title="Einstellungen" aria-label="Einstellungen">⚙</button>
+  </div>
+  <div class="sheet" id="menu" hidden>
+    <div class="sheet-back" id="menuBack"></div>
+    <div class="sheet-card" role="dialog" aria-label="Einstellungen">
+      <div class="sheet-head"><b>Einstellungen</b><button id="menuClose" aria-label="Schließen">✕</button></div>
+      <div class="row"><span>Zähigkeit</span><div class="visc"><small>Wasser</small><input type="range" id="visc" min="0" max="4" step="0.05" value="2.1" aria-label="Zähigkeit: Wasser bis Honig"><small>Honig</small></div></div>
+      <div class="row"><span>Wasser</span><button id="fluidBtn" aria-pressed="true" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: flüssig</button></div>
+      <div class="row" id="tiltRow" hidden><span>Handy neigen</span><button id="tiltBtn" aria-pressed="false" title="iPhone/Handy neigen statt ziehen">Neigen</button></div>
+      <div class="row"><span>Alles unbegrenzt</span><button id="zen" aria-pressed="false" title="Unbegrenzt Wasser, Tinte und Radierer">Zen</button></div>
+      <div class="row"><span>Blatt neu beginnen</span><button id="restart" title="Blatt neu beginnen">Neu</button></div>
+      <p class="keys">Ziehen oder Mausrad dreht das Blatt. Tasten: Q/E drehen · D Drehen · P Stift · R Radierer · Z zurück · W Wasser</p>
+    </div>
   </div>
 </div>
 
 <script>
 (() => {
 // ---------- Version ----------
-// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 78c6256 ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.12', VERSION_NOTE = 'Neuer Standard: flüssig, Zähigkeit 2,1', BUILD = '78c6256';
+// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. f6181ce ersetzt tools/pages.sh durch den Commit.
+const VERSION = '0.13', VERSION_NOTE = 'Aufgeräumt: Einstellungen im ⚙-Menü, mehr Platz fürs Blatt', BUILD = 'f6181ce';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -608,7 +633,7 @@ function progress() {
     if (ok) { sum += Math.min(1, s.cov / .8); if (s.cov >= .6) done++; }   // falsche Farbe zählt nicht
   }
   const avg = sum / TARGETS.length, stars = avg >= .85 ? 3 : avg >= .6 ? 2 : avg >= .35 ? 1 : 0;
-  document.getElementById('filled').textContent = `${done} / ${TARGETS.length} Formen · Farben ${colors} / ${GOALS.length} · ${Math.round(avg * 100)} %`;
+  const f = document.getElementById('filled'); f.textContent = `${done}/${TARGETS.length} Formen · ${colors}/${GOALS.length} Farben`; f.title = `Schnitt ${Math.round(avg * 100)} %`;
   document.getElementById('stars').innerHTML = '<b>' + '★'.repeat(stars) + '</b>' + '★'.repeat(3 - stars);
   if (stars > lastStars) toast(['', 'Erster Stern!', 'Zweiter Stern!', 'Drei Sterne. Das Bild ist fertig.'][stars]);
   lastStars = stars;
@@ -628,7 +653,7 @@ function layout() {
   cv.style.width = baseW + 'px'; cv.style.height = baseH + 'px';
   cv.style.transform = `translate(-50%,-50%) rotate(${ang}deg) scale(${scale})`;
 }
-function setAng(a) { ang = a; layout(); document.getElementById('hint').hidden = true; }
+function setAng(a) { ang = a; layout(); }
 // Beim Loslassen rastet das Blatt ein, wenn es fast gerade steht.
 function snap() { const n = Math.round(ang / 90) * 90; if (Math.abs(ang - n) < 6) setAng(n); }
 // Halten von ⟲ ⟳ oder Q/E dreht gleichmäßig weiter.
@@ -709,12 +734,6 @@ function restart() {
   for (const f of FUNNELS) f.left = RES;
   rebuildWalls(); updTools(); progress();
 }
-for (const [id, d] of [['rotL', -1], ['rotR', 1]]) {
-  const b = document.getElementById(id);
-  b.addEventListener('pointerdown', e => { b.setPointerCapture(e.pointerId); startSpin(d); });
-  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, stopSpin);
-  b.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAng(ang + d * 15); } });
-}
 document.getElementById('toolTurn').onclick = () => setTool('turn');
 
 // ---------- Neigungssensor ----------
@@ -722,7 +741,7 @@ document.getElementById('toolTurn').onclick = () => setTool('turn');
 // kommt aus beta/gamma (Schwerkraft im Gerät = (sin γ·cos β, −sin β), Bildschirm-y zeigt nach unten) und wird zur Drehung addiert.
 const tiltBtn = document.getElementById('tiltBtn');
 let tiltOn = false, tiltSeen = false;
-if ('DeviceOrientationEvent' in window && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) tiltBtn.hidden = false;
+if ('DeviceOrientationEvent' in window && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) document.getElementById('tiltRow').hidden = false;
 function onOrient(e) {
   if (e.beta == null || e.gamma == null) return;
   tiltSeen = true;
@@ -744,7 +763,7 @@ async function toggleTilt() {
     }
   } catch (err) { toast('Sensor hier gesperrt (eingebettete Seite?)'); return; }
   tiltOn = true; tiltSeen = false; addEventListener('deviceorientation', onOrient); tiltBtn.setAttribute('aria-pressed', true);
-  document.getElementById('hint').hidden = true; toast('Neig das Handy');
+  closeMenu(); toast('Neig das Handy');
   setTimeout(() => { if (tiltOn && !tiltSeen) toast('Keine Sensordaten – evtl. blockiert die Einbettung'); }, 1500);
 }
 tiltBtn.onclick = toggleTilt;
@@ -761,9 +780,19 @@ viscIn.addEventListener('input', () => { setVisc(+viscIn.value); try { localStor
 document.getElementById('toolPen').onclick = () => setTool('pen');
 document.getElementById('toolErase').onclick = () => setTool('erase');
 document.getElementById('undo').onclick = undo;
-document.getElementById('restart').onclick = restart;
+document.getElementById('restart').onclick = () => { restart(); closeMenu(); };
+// Einstellungen auf- und zuklappen
+const menu = document.getElementById('menu'), menuBtn = document.getElementById('menuBtn');
+function openMenu() { menu.hidden = false; menuBtn.setAttribute('aria-expanded', true); document.getElementById('menuClose').focus(); }
+function closeMenu() { if (menu.hidden) return; menu.hidden = true; menuBtn.setAttribute('aria-expanded', false); menuBtn.focus(); }
+menuBtn.onclick = () => menu.hidden ? openMenu() : closeMenu();
+document.getElementById('menuClose').onclick = closeMenu; document.getElementById('menuBack').onclick = closeMenu;
+addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+// Beim ersten Start einmal kurz erklären (statt fester Hinweiszeile)
+try { if (!localStorage.getItem('aquarell-seen')) { setTimeout(() => toast('Zieh am Blatt, um es zu kippen'), 400); localStorage.setItem('aquarell-seen', '1'); } } catch (e) {}
 document.getElementById('zen').onclick = e => { zen = !zen; e.currentTarget.setAttribute('aria-pressed', zen); updTools(); toast(zen ? 'Zen: alles unbegrenzt' : 'Zen aus'); };
 addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;   // Pfeiltasten am Schieber nicht als Drehen werten
   const k = e.key.toLowerCase();
   if (k === 'q' || k === 'arrowleft') startSpin(-1);
   else if (k === 'e' || k === 'arrowright') startSpin(1);
