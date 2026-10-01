@@ -68,6 +68,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 .row[hidden]{display:none}
 .visc{display:flex;align-items:center;gap:8px;color:var(--muted)}
 .visc input{width:min(170px,40vw);accent-color:var(--accent)}
+.levels{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .keys{color:var(--muted);font-size:.75rem;opacity:.8;margin:8px 0 0;line-height:1.4}
 #toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--paper);color:#2a2026;
   font-family:var(--display);font-size:1.2rem;padding:6px 16px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.4);
@@ -91,6 +92,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
     <div class="sheet-back" id="menuBack"></div>
     <div class="sheet-card" role="dialog" aria-label="Einstellungen">
       <div class="sheet-head"><b>Einstellungen</b><button id="menuClose" aria-label="Schließen">✕</button></div>
+      <div class="row"><span>Level</span><div class="levels" id="levels"></div></div>
       <div class="row"><span>Zähigkeit</span><div class="visc"><small>Wasser</small><input type="range" id="visc" min="0" max="4" step="0.05" value="2.1" aria-label="Zähigkeit: Wasser bis Honig"><small>Honig</small></div></div>
       <div class="row"><span>Wasser</span><button id="fluidBtn" aria-pressed="true" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: flüssig</button></div>
       <div class="row" id="tiltRow" hidden><span>Handy neigen</span><button id="tiltBtn" aria-pressed="false" title="iPhone/Handy neigen statt ziehen">Neigen</button></div>
@@ -104,8 +106,8 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 <script>
 (() => {
 // ---------- Version ----------
-// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. ad0e58c ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.14', VERSION_NOTE = 'Schraffur zeigt, wo noch Farbe fehlt (Punkte antippen: aufleuchten)', BUILD = 'ad0e58c';
+// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 6b7a219 ersetzt tools/pages.sh durch den Commit.
+const VERSION = '0.15', VERSION_NOTE = 'Zwei neue Level: Drei Schalen, Luftlöcher (Level-Wahl im ⚙-Menü)', BUILD = '6b7a219';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -185,10 +187,23 @@ function inPoly(x, y, poly) {
   return c;
 }
 
-// ---------- Level 1: nach der Kreide-Skizze ----------
-// target: true = ganze Form füllen; {from,to} = nur dieser Abschnitt ist die Mulde
+// ---------- Level ----------
+// Ein Level ist ein Datensatz: Formen (Kreidelinien), Trichter, Radierer und Tinte.
+// Formen: pts (wird geglättet) oder dense (fertige Punkte); c = Kreidefarbe k/g/r.
+// target: true = ganze Form füllen; {from,to} = nur dieser Abschnitt ist die Mulde; {poly} = eigene Zielfläche
 // goal: Zielfarbe (siehe MIX), dab: wo der Farbklecks mit der Zielfarbe sitzt
-const LEVEL = [
+// Trichter: Farbe, Position am Rand, n = Richtung ins Blatt. Er gießt, solange seine Kante ungefähr oben ist.
+const bowl = (cx, y, w, d) => [[cx - w / 2, y], [cx - w / 2 + 2, y + d * .75], [cx, y + d], [cx + w / 2 - 2, y + d * .75], [cx + w / 2, y]];
+// U-Kammer: Einlauf oben links, Kammer rechts daneben mit Deckel; erreichbar nur von unten durch den Spalt unter der Trennwand.
+const chamber = a => [
+  { c: 'k', dense: [[a - 11, 86], [a - 5, 92], [a - 5, 150], [a + 25, 150], [a + 25, 112], [a + 5, 112]] },
+  { c: 'k', dense: [[a + 5, 92], [a + 5, 142]] },
+  { c: 'k', dense: [[a + 25, 112], [a + 25, 112.1]], target: { poly: [[a + 6.5, 113.5], [a + 23.5, 113.5], [a + 23.5, 148.5], [a + 6.5, 148.5]] } },
+];
+const LEVELS = [
+  { name: 'Skizze', erasers: 7, ink: 260,
+    funnels: [{ c: 'blau', x: 70, y: 0, n: [0, 1] }, { c: 'rot', x: 0, y: 104, n: [1, 0] }, { c: 'gelb', x: W - 1, y: 72, n: [-1, 0] }],
+    shapes: [
   { c: 'k', pts: [[39,23.8],[52.7,30.8],[53.2,41.5],[46.6,50],[34.5,56.4],[30.9,65],[35.5,71.4],[44.6,72.5],[51.7,68.2],[50.7,61.8],[46.6,62.8]], target: { from: 4 } },
   { c: 'k', pts: [[104,29.4],[103.5,39],[98.4,45.4],[83.2,46],[73,49.7],[70.5,60.4],[75,70],[83.2,73.2],[88.3,70],[87.2,65.7],[83.2,66.8]], target: { from: 4 } },
   { c: 'k', dense: cloud(44, 87, 9.5), closed: true, target: true, goal: 'grün', dab: [30, 80] },
@@ -212,30 +227,48 @@ const LEVEL = [
   { c: 'g', pts: [[76.6,188.7],[92.3,184.4],[111.1,189.8]] },
   { c: 'g', pts: [[71.5,185.5],[72,197.3],[86.7,201.5]], target: true },
   { c: 'g', pts: [[100.4,197.2],[110.5,201.5],[118.6,194]], target: true },
+] },
+  // Lenken lernen: beide Trichter oben. Gerade gießen beide in die Mitte (grün), schräg trifft jeweils nur einer eine Seitenschale.
+  { name: 'Drei Schalen', erasers: 2, ink: 120,
+    funnels: [{ c: 'blau', x: 60, y: 0, n: [0, 1] }, { c: 'gelb', x: 90, y: 0, n: [0, 1] }],
+    shapes: [
+      { c: 'k', pts: bowl(35, 112, 34, 16), target: true, goal: 'blau', dab: [35, 140] },
+      { c: 'k', pts: bowl(75, 160, 34, 16), target: true, goal: 'grün', dab: [75, 188] },
+      { c: 'k', pts: bowl(115, 112, 34, 16), target: true, goal: 'gelb', dab: [115, 140] },
+      { c: 'g', pts: [[12, 40], [20, 52], [16, 64], [24, 72]] },
+      { c: 'r', pts: [[126, 196], [132, 188], [140, 192], [136, 202]] },
+    ] },
+  // Luft als Gegenspieler: Die Kammern hängen nur unten am Einlauf. Eingeschlossene Luft hält das Wasser draußen,
+  // bis man oben ein Luftloch radiert. Braucht „Wasser: flüssig“.
+  { name: 'Luftlöcher', erasers: 2, ink: 80, fluid: true, res: 12000,
+    funnels: [{ c: 'blau', x: 63, y: 0, n: [0, 1] }],
+    shapes: [...chamber(18), ...chamber(63), ...chamber(108)] },
 ];
+const FCOL = { blau: ['Blau', '#2660c4'], rot: ['Rot', '#d4303e'], gelb: ['Gelb', '#f2c420'] };
 const PER = 6;
-for (const s of LEVEL) {
-  if (!s.dense) s.dense = catmull(s.pts, false, PER);
-  if (s.target) {
-    let poly;
-    if (s.closed) poly = s.dense;
-    else if (s.target === true) poly = hull(s.dense);
-    else { const a = (s.target.from || 0) * PER, b = s.target.to != null ? s.target.to * PER + 1 : s.dense.length; poly = hull(s.dense.slice(a, b)); }
-    s.poly = poly;
-  }
+let LEVEL, FUNNELS, TARGETS, GOALS, levelNo = 0;
+const RES = 4200;   // Standard-Vorrat je Trichter, ein Level kann res setzen
+function prepLevel(k) {
+  const L = LEVELS[k];
+  LEVEL = L.shapes.map(s0 => {
+    const s = { ...s0 };
+    if (!s.dense) s.dense = catmull(s.pts, false, PER);
+    if (s.target) {
+      if (s.target.poly) s.poly = s.target.poly;
+      else if (s.closed) s.poly = s.dense;
+      else if (s.target === true) s.poly = hull(s.dense);
+      else { const a = (s.target.from || 0) * PER, b = s.target.to != null ? s.target.to * PER + 1 : s.dense.length; s.poly = hull(s.dense.slice(a, b)); }
+    }
+    return s;
+  });
+  FUNNELS = L.funnels.map(f => ({ name: FCOL[f.c][0], col: FCOL[f.c][1], pig: PIG[f.c], x: f.x, y: f.y, n: f.n, max: L.res || RES }));
+  TARGETS = LEVEL.filter(s => s.poly); GOALS = TARGETS.filter(s => s.goal);
+  inkMax = L.ink; erasersMax = L.erasers;
 }
-
-// Trichter: Position am Rand, n = Richtung ins Blatt. Er gießt nur, wenn seine Kante oben ist.
-const FUNNELS = [
-  { name: 'Blau', pig: PIG.blau, col: '#2660c4', x: 70, y: 0, n: [0, 1] },
-  { name: 'Rot', pig: PIG.rot, col: '#d4303e', x: 0, y: 104, n: [1, 0] },
-  { name: 'Gelb', pig: PIG.gelb, col: '#f2c420', x: W - 1, y: 72, n: [-1, 0] },
-];
-const RES = 4200;
 
 // ---------- Zustand ----------
 let ops = [], ang = 0, zen = false, tool = 'turn';   // ang: Drehung des Blatts in Grad, im Uhrzeigersinn
-let ink, inkMax = 260, erasers, erasersMax = 7;   // 7: jede Mischfarbe braucht eine Form mit zwei Lücken (Durchfluss)
+let ink, inkMax = 260, erasers, erasersMax = 7;   // pro Level überschrieben (prepLevel)   // 7: jede Mischfarbe braucht eine Form mit zwei Lücken (Durchfluss)
 // Schwerkraft in Blatt-Koordinaten: unten auf dem Bildschirm ist (sin ang, cos ang). DIRS[k] = Schwerkraft bei k·45°.
 const DIRS = [[0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1], [-1, 0], [-1, 1]];
 let gk = 0, gt = 0, gvec = [0, 1];   // Nachbarrichtung, Anteil zur nächsten, Vektor
@@ -470,15 +503,19 @@ function pressure(gx, gy) {
     pTick++;
     let nc = 0, ne = 0, sp = 0; pStack[sp++] = s0; pMark[s0] = pTick;
     while (sp) {
-      const i = pStack[--sp], x = i % W, y = (i / W) | 0; pHc[nc] = h(i); pCells[nc++] = i;
+      const i = pStack[--sp], x = i % W, y = (i / W) | 0, k0 = nc; pCells[nc++] = i;
+      let surf = false;
       for (let d = 0; d < 4; d++) {
         const nx = x + (d === 0) - (d === 1), ny = y + (d === 2) - (d === 3);
         if (!inside(nx, ny)) continue;
         const j = ny * W + nx;
         if (wall[j]) continue;
         if (water[j]) { if (moved[j] !== tick && pMark[j] < first) { pMark[j] = pTick; pStack[sp++] = j; } }
-        else if (eMark[j] !== pTick && airOpen[j] === airTick) { eMark[j] = pTick; pHe[ne] = h(j); pEmpty[ne++] = j; }
+        else if (airOpen[j] === airTick) { surf = true; if (eMark[j] !== pTick) { eMark[j] = pTick; pHe[ne] = h(j); pEmpty[ne++] = j; } }
       }
+      // Nur Wasser an einer freien Oberfläche wird umverteilt: Eine volle Kammer mit Öffnung unten hält ihr Wasser
+      // (wie eine umgedrehte Flasche in der Schüssel), statt leergesaugt zu werden.
+      pHc[k0] = surf ? h(i) : -1e9;
     }
     if (nc < 3 || !ne) continue;
     let mx = -1e9, mn = 1e9;                             // schon ausgeglichen? (der Normalfall) → nichts zu tun
@@ -610,7 +647,7 @@ function drawFunnels() {
   for (const f of FUNNELS) {
     const [nx, ny] = f.n, px = -ny, py = nx, cx = (f.x + .5) * R, cy = (f.y + .5) * R;
     const pt = (u, v) => [cx + (px * u + nx * v) * R, cy + (py * u + ny * v) * R];
-    const fill = zen ? 1 : f.left / RES, active = pours(f);
+    const fill = zen ? 1 : f.left / f.max, active = pours(f);
     ctx.save();
     ctx.beginPath(); ctx.moveTo(...pt(-5, 0)); ctx.lineTo(...pt(5, 0)); ctx.lineTo(...pt(1, 5)); ctx.lineTo(...pt(-1, 5)); ctx.closePath();
     ctx.fillStyle = f.col; ctx.globalAlpha = .18 + .72 * fill; ctx.fill();
@@ -638,7 +675,6 @@ const mixCss = m => { const a = [0, 1, 2].map(c => m[0] * PIG.blau[c] + m[1] * P
   return `rgb(${a.map(v => Math.round(247 * Math.exp(-v * .9))).join(',')})`; };
 
 // ---------- Fortschritt ----------
-const TARGETS = LEVEL.filter(s => s.poly), GOALS = TARGETS.filter(s => s.goal);
 let lastStars = 0;
 function progress() {
   let sum = 0, done = 0, colors = 0;
@@ -656,10 +692,10 @@ function progress() {
     if (ok) { sum += Math.min(1, s.cov / .8); if (s.cov >= .6) done++; }   // falsche Farbe zählt nicht
   }
   const avg = sum / TARGETS.length, stars = avg >= .85 ? 3 : avg >= .6 ? 2 : avg >= .35 ? 1 : 0;
-  const f = document.getElementById('filled'); f.textContent = `${done}/${TARGETS.length} Formen · ${colors}/${GOALS.length} Farben`; f.title = `Schnitt ${Math.round(avg * 100)} %`;
+  const f = document.getElementById('filled'); f.textContent = `L${levelNo + 1} · ${done}/${TARGETS.length} Formen` + (GOALS.length ? ` · ${colors}/${GOALS.length} Farben` : ''); f.title = `Schnitt ${Math.round(avg * 100)} %`;
   document.getElementById('stars').innerHTML = '<b>' + '★'.repeat(stars) + '</b>' + '★'.repeat(3 - stars);
   updateHatch();
-  if (stars > lastStars) toast(['', 'Erster Stern!', 'Zweiter Stern!', 'Drei Sterne. Das Bild ist fertig.'][stars]);
+  if (stars > lastStars) toast(['', 'Erster Stern!', 'Zweiter Stern!', levelNo < LEVELS.length - 1 ? 'Drei Sterne! Nächstes Level im ⚙-Menü' : 'Drei Sterne. Das Bild ist fertig.'][stars]);
   lastStars = stars;
 }
 document.querySelector('.score').addEventListener('click', () => { hatchFlash = performance.now() + 1800; toast('Schraffiert = fehlt noch'); });
@@ -756,7 +792,7 @@ function updTools() {
 }
 function restart() {
   water.fill(0); drift.fill(0); mom.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
-  for (const f of FUNNELS) f.left = RES;
+  for (const f of FUNNELS) f.left = f.max;
   rebuildWalls(); updTools(); progress();
 }
 document.getElementById('toolTurn').onclick = () => setTool('turn');
@@ -806,6 +842,17 @@ document.getElementById('toolPen').onclick = () => setTool('pen');
 document.getElementById('toolErase').onclick = () => setTool('erase');
 document.getElementById('undo').onclick = undo;
 document.getElementById('restart').onclick = () => { restart(); closeMenu(); };
+// Level wählen (im Browser gemerkt)
+function setLevel(k, quiet) {
+  levelNo = Math.max(0, Math.min(LEVELS.length - 1, k)); prepLevel(levelNo); restart(); setAng(0);   // neues Level beginnt gerade
+  document.querySelectorAll('#levels button').forEach((b, i) => b.setAttribute('aria-pressed', i === levelNo));
+  try { localStorage.setItem('aquarell-level', levelNo); } catch (e) {}
+  let note = '';
+  if (LEVELS[levelNo].fluid && !fluid) { fluid = true; showFluid(); note = ' (Wasser auf flüssig gestellt)'; }   // Luft und Druck gibt es nur flüssig
+  if (!quiet) toast(`Level ${levelNo + 1}: ${LEVELS[levelNo].name}${note}`);
+}
+LEVELS.forEach((L, i) => { const b = document.createElement('button'); b.textContent = `${i + 1} ${L.name}`; b.setAttribute('aria-pressed', i === levelNo);
+  b.onclick = () => { setLevel(i); closeMenu(); }; document.getElementById('levels').appendChild(b); });
 // Einstellungen auf- und zuklappen
 const menu = document.getElementById('menu'), menuBtn = document.getElementById('menuBtn');
 function openMenu() { menu.hidden = false; menuBtn.setAttribute('aria-expanded', true); document.getElementById('menuClose').focus(); }
@@ -838,10 +885,11 @@ function loop() {
   if (++frame % 20 === 0) progress();
   requestAnimationFrame(loop);
 }
-restart(); layout(); requestAnimationFrame(loop);
+{ let k = 0; try { k = +(localStorage.getItem('aquarell-level') || 0); } catch (e) {} setLevel(k, true); }
+layout(); requestAnimationFrame(loop);
 // Test-Hilfe: n Frames ohne Warten vorspulen
 function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3 === 0) bleed(); } render(); progress(); }
-window.__aquarell = { step, advance, water, stain, TARGETS, GOALS, setFluid: v => { fluid = v; }, setVisc, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
+window.__aquarell = { step, advance, water, stain, setLevel, get TARGETS() { return TARGETS; }, get GOALS() { return GOALS; }, setFluid: v => { fluid = v; }, setVisc, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
 })();
 </script>
 </body>
