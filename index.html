@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#3b2a20">
+</head>
+<body>
+<title>Aquarell</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Karla:wght@400;600&display=swap">
+<style>
+/* Layout: ein Blatt Papier auf einem Holztisch, Werkzeuge liegen unten wie Stifte daneben. Bewusst nur ein Look (Tisch ist immer dunkel). */
+:root{
+  --table:#3b2a20; --table-2:#4a3526; --paper:#f7f4ee; --ink:#f3ece2; --muted:#c8b8a6;
+  --chip:#2c1f17; --chip-line:#6b5140; --accent:#e9b949;
+  --blau:#2660c4; --rot:#d4303e; --gelb:#f2c420;
+  --display:"Kalam","Comic Sans MS",cursive; --body:"Karla",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--table);color:var(--ink);font-family:var(--body);margin:0;
+  background-image:repeating-linear-gradient(92deg,rgba(255,255,255,.025) 0 2px,transparent 2px 9px),linear-gradient(var(--table),var(--table-2));
+  overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+.app{height:100%;display:flex;flex-direction:column;padding-inline:16px;box-sizing:border-box}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-block:10px 4px;flex-wrap:wrap}
+h1{font-family:var(--display);font-weight:700;font-size:1.9rem;margin:0;line-height:1;letter-spacing:.01em}
+h1 span{color:var(--blau);filter:brightness(1.4)}
+.score{display:flex;align-items:baseline;gap:12px;font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem}
+.stars{font-size:1.3rem;letter-spacing:.1em;color:var(--chip-line)}
+.stars b{color:var(--accent);font-weight:400}
+.stage{position:relative;flex:1;min-height:0}
+#paper{position:absolute;left:50%;top:50%;transform-origin:50% 50%;
+  box-shadow:0 14px 30px rgba(0,0,0,.45),0 2px 4px rgba(0,0,0,.3);cursor:crosshair}
+.tools{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding-block:8px 12px}
+.tools button{font:600 .9rem var(--body);color:var(--ink);background:var(--chip);border:1.5px solid var(--chip-line);
+  border-radius:10px;padding:8px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;min-height:40px}
+.tools button:hover{border-color:var(--muted)}
+.tools button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tools button[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.tools .rot{font-size:1.2rem;padding-inline:14px}
+.meter{width:46px;height:6px;border-radius:3px;background:var(--chip-line);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--ink);width:100%}
+.count{font-variant-numeric:tabular-nums;color:var(--muted)}
+.hint{font-family:var(--display);color:var(--muted);text-align:center;font-size:1rem;margin:0;padding-bottom:2px}
+.sep{width:1px;background:var(--chip-line);margin-inline:2px}
+@media (max-width:480px){.tools{gap:5px}.tools button{padding:6px 8px;font-size:.8rem;gap:5px;min-height:38px}.tools .rot{padding-inline:10px}.meter{width:26px}}
+#toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--paper);color:#2a2026;
+  font-family:var(--display);font-size:1.2rem;padding:6px 16px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.4);
+  transition:opacity .4s;opacity:0;pointer-events:none;z-index:3}
+</style>
+
+<div class="app">
+  <header>
+    <h1>Aqua<span>rell</span></h1>
+    <div class="score"><span id="filled">0 / 0 Formen gefüllt</span><span class="stars" id="stars" aria-label="Sterne">★★★</span></div>
+  </header>
+  <p class="hint" id="hint">Zieh am Blatt, um es zu kippen: Der Trichter oben gießt, der Strahl folgt der Neigung. Die Farbkleckse zeigen die Zielfarbe.</p>
+  <div class="stage" id="stage"><canvas id="paper"></canvas><div id="toast"></div></div>
+  <div class="tools">
+    <button class="rot" id="rotL" title="Halten: gegen den Uhrzeigersinn drehen (Q)" aria-label="Nach links drehen">⟲</button>
+    <button id="toolTurn" aria-pressed="true" title="Drehen: Blatt mit dem Finger oder der Maus kippen (D)">Drehen</button>
+    <button id="toolPen" aria-pressed="false" title="Stift: eigene Linien (begrenzte Tinte)">Stift <span class="meter"><i id="inkBar"></i></span></button>
+    <button id="toolErase" aria-pressed="false" title="Radierer: Lücken in Linien radieren">Radierer <span class="count" id="eraseCount">7</span></button>
+    <button id="undo" title="Letzten Strich zurücknehmen (Z)">Zurück</button>
+    <button id="restart" title="Blatt neu beginnen">Neu</button>
+    <button id="tiltBtn" aria-pressed="false" hidden title="iPhone/Handy neigen statt ziehen">Neigen</button>
+    <button id="zen" aria-pressed="false" title="Unbegrenzt Wasser, Tinte und Radierer">Zen</button>
+    <button class="rot" id="rotR" title="Halten: im Uhrzeigersinn drehen (E)" aria-label="Nach rechts drehen">⟳</button>
+  </div>
+</div>
+
+<script>
+(() => {
+// ---------- Raster ----------
+const W = 150, H = 210, N = W * H, R = 6;          // Zellen, Pixel pro Zelle
+const wall = new Uint8Array(N), water = new Uint8Array(N);
+const pa = new Float32Array(N * 3);                  // Pigment (Absorbanz) pro Wasserzelle
+const stain = new Float32Array(N * 3);               // Pigment im Papier
+const wet = new Float32Array(N);                     // wie nass das Papier gerade ist (0..1)
+const gran = new Float32Array(N);                    // Papierkorn: manche Stellen nehmen mehr Farbe an
+for (let i = 0; i < N; i++) gran[i] = .82 + Math.random() * .36;
+const sumBuf = new Float32Array(N), blurBuf = new Float32Array(N), tmpBuf = new Float32Array(N);
+const moved = new Uint32Array(N);
+let tick = 1;
+
+const absOf = hex => { const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(c => -Math.log(Math.max(c, 8) / 255)); };
+const PIG = { blau: absOf('#2660c4'), rot: absOf('#d4303e'), gelb: absOf('#f2c420') };
+
+const CRAYON = { k: '#1d1b1f', g: '#4fae48', r: '#d8383f', p: '#6f6874' };
+
+// ---------- Formen-Helfer ----------
+function catmull(pts, closed, per = 6) {
+  const out = [], n = pts.length, P = i => closed ? pts[(i + n) % n] : pts[Math.max(0, Math.min(n - 1, i))];
+  const segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    for (let s = 0; s < per; s++) {
+      const t = s / per, t2 = t * t, t3 = t2 * t;
+      out.push([0, 1].map(k => .5 * ((2 * p1[k]) + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t2 + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t3)));
+    }
+  }
+  out.push(closed ? out[0].slice() : pts[n - 1].slice());
+  return out;
+}
+function spiral(cx, cy, r0, r1, turns, a0) {
+  const out = [], steps = Math.round(60 * Math.abs(turns));   // turns < 0: läuft gegen den Uhrzeigersinn nach innen
+  for (let i = 0; i <= steps; i++) { const t = i / steps, a = a0 + t * turns * Math.PI * 2, r = r0 + (r1 - r0) * t;
+    out.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); }
+  return out;
+}
+function cloud(cx, cy, R0) {
+  const out = [];
+  for (let i = 0; i <= 120; i++) { const a = i / 120 * Math.PI * 2, r = R0 * (.72 + .28 * Math.abs(Math.sin(2.5 * a + .4)));
+    out.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); }
+  return out;
+}
+function concave(corners, pull = .32) {
+  const cx = corners.reduce((s, p) => s + p[0], 0) / corners.length, cy = corners.reduce((s, p) => s + p[1], 0) / corners.length;
+  const out = [];
+  for (let i = 0; i < corners.length; i++) {
+    const A = corners[i], B = corners[(i + 1) % corners.length];
+    const M = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2], C = [M[0] + (cx - M[0]) * pull, M[1] + (cy - M[1]) * pull];
+    for (let s = 0; s < 10; s++) { const t = s / 10, u = 1 - t;
+      out.push([u * u * A[0] + 2 * u * t * C[0] + t * t * B[0], u * u * A[1] + 2 * u * t * C[1] + t * t * B[1]]); }
+  }
+  out.push(corners[0].slice());
+  return out;
+}
+function hull(points) {
+  const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+function inPoly(x, y, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+
+// ---------- Level 1: nach der Kreide-Skizze ----------
+// target: true = ganze Form füllen; {from,to} = nur dieser Abschnitt ist die Mulde
+// goal: Zielfarbe (siehe MIX), dab: wo der Farbklecks mit der Zielfarbe sitzt
+const LEVEL = [
+  { c: 'k', pts: [[39,23.8],[52.7,30.8],[53.2,41.5],[46.6,50],[34.5,56.4],[30.9,65],[35.5,71.4],[44.6,72.5],[51.7,68.2],[50.7,61.8],[46.6,62.8]], target: { from: 4 } },
+  { c: 'k', pts: [[104,29.4],[103.5,39],[98.4,45.4],[83.2,46],[73,49.7],[70.5,60.4],[75,70],[83.2,73.2],[88.3,70],[87.2,65.7],[83.2,66.8]], target: { from: 4 } },
+  { c: 'k', dense: cloud(44, 87, 9.5), closed: true, target: true, goal: 'grün', dab: [30, 80] },
+  { c: 'k', dense: concave([[60.3,79.1],[71.4,86.1],[66.9,98.3],[54.8,90.9]]), closed: true, target: true, goal: 'violett', dab: [77, 93] },
+  { c: 'k', dense: concave([[100.9,63.1],[123.7,65.7],[127.8,95.7],[102.4,86.1]], .25), closed: true, target: true, goal: 'orange', dab: [137, 84] },
+  { c: 'k', dense: concave([[25.4,103.7],[46.6,101.6],[37,114.9]], .3), closed: true, target: true },
+  { c: 'k', dense: spiral(72, 124, 16, 3.5, -1.75, -1.5), target: true, goal: 'blau', dab: [93, 133] },
+  { c: 'k', pts: [[36.5,155.5],[48.7,141.6],[62.9,139.5],[72,148]], target: true },
+  { c: 'k', pts: [[27,163],[37,172.5],[50,173],[57,166]] },
+  { c: 'k', pts: [[61.9,168.3],[71,163],[84.1,165.1]] },
+  { c: 'g', pts: [[10.6,31.5],[22,40],[25.3,50],[19.3,62.6],[13.2,61.5]] },
+  { c: 'g', pts: [[16.2,54.6],[10.6,62.6],[12,70],[19.3,74.3]] },
+  { c: 'r', pts: [[3.5,101],[7,93],[11.2,91.9],[15.5,93.5],[19.3,98.9],[22,93.5],[26.4,91.9],[31,93],[35.5,97.3]], target: { from: 2, to: 6 } },
+  { c: 'g', pts: [[87.2,81.8],[94.3,90.3],[94.3,97.8],[89.3,101]] },
+  { c: 'g', pts: [[86.8,93.5],[86.2,102],[91.3,108.5],[97.9,112.2]] },
+  { c: 'r', dense: spiral(107.5, 112, 7.5, 1.5, 1.3, -Math.PI * .45), target: true },
+  { c: 'r', pts: [[9,136],[13,144],[20,146],[24,141],[25,146],[32,146],[37,137]], target: true },
+  { c: 'r', dense: spiral(104, 161, 12, 2, 1.9, -1.5), target: true },
+  { c: 'g', pts: [[21.3,179.1],[30,184],[32.5,190],[31.4,200.4],[25.4,202.5]] },
+  { c: 'g', pts: [[26.9,191.8],[21.3,198.2],[22.3,205.7],[29.4,207]] },
+  { c: 'g', pts: [[76.6,188.7],[92.3,184.4],[111.1,189.8]] },
+  { c: 'g', pts: [[71.5,185.5],[72,197.3],[86.7,201.5]], target: true },
+  { c: 'g', pts: [[100.4,197.2],[110.5,201.5],[118.6,194]], target: true },
+];
+const PER = 6;
+for (const s of LEVEL) {
+  if (!s.dense) s.dense = catmull(s.pts, false, PER);
+  if (s.target) {
+    let poly;
+    if (s.closed) poly = s.dense;
+    else if (s.target === true) poly = hull(s.dense);
+    else { const a = (s.target.from || 0) * PER, b = s.target.to != null ? s.target.to * PER + 1 : s.dense.length; poly = hull(s.dense.slice(a, b)); }
+    s.poly = poly;
+  }
+}
+
+// Trichter: Position am Rand, n = Richtung ins Blatt. Er gießt nur, wenn seine Kante oben ist.
+const FUNNELS = [
+  { name: 'Blau', pig: PIG.blau, col: '#2660c4', x: 70, y: 0, n: [0, 1] },
+  { name: 'Rot', pig: PIG.rot, col: '#d4303e', x: 0, y: 104, n: [1, 0] },
+  { name: 'Gelb', pig: PIG.gelb, col: '#f2c420', x: W - 1, y: 72, n: [-1, 0] },
+];
+const RES = 4200;
+
+// ---------- Zustand ----------
+let ops = [], ang = 0, zen = false, tool = 'turn';   // ang: Drehung des Blatts in Grad, im Uhrzeigersinn
+let ink, inkMax = 260, erasers, erasersMax = 7;   // 7: jede Mischfarbe braucht eine Form mit zwei Lücken (Durchfluss)
+// Schwerkraft in Blatt-Koordinaten: unten auf dem Bildschirm ist (sin ang, cos ang). DIRS[k] = Schwerkraft bei k·45°.
+const DIRS = [[0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1], [-1, 0], [-1, 1]];
+let gk = 0, gt = 0, gvec = [0, 1];   // Nachbarrichtung, Anteil zur nächsten, Vektor
+let tilt = 0;                         // Neigungssensor: Richtung der echten Schwerkraft auf dem Bildschirm in Grad (0 = unten)
+function setGravity() {
+  const g = ang + tilt, f = ((g / 45) % 8 + 8) % 8, a = g * Math.PI / 180;
+  gk = Math.floor(f); gt = f - gk; if (gt > .9999) { gk = (gk + 1) & 7; gt = 0; }
+  gvec = [Math.sin(a), Math.cos(a)];
+}
+
+// ---------- Canvas ----------
+const cv = document.getElementById('paper'), ctx = cv.getContext('2d');
+cv.width = W * R; cv.height = H * R;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const paperC = mk(W * R, H * R), wallC = mk(W * R, H * R), stainC = mk(W, H), waterC = mk(W, H);
+const wctx = wallC.getContext('2d'), sctx = stainC.getContext('2d'), qctx = waterC.getContext('2d');
+const sImg = sctx.createImageData(W, H), qImg = qctx.createImageData(W, H);
+
+(function paper() {
+  const p = paperC.getContext('2d'); p.fillStyle = '#f7f4ee'; p.fillRect(0, 0, W * R, H * R);
+  const id = p.getImageData(0, 0, W * R, H * R), d = id.data;
+  for (let i = 0; i < d.length; i += 4) { const v = (Math.random() - .5) * 10; d[i] += v; d[i + 1] += v; d[i + 2] += v - 1; }
+  p.putImageData(id, 0, 0);
+})();
+const grain = (() => { const c = mk(96, 96), x = c.getContext('2d'), id = x.createImageData(96, 96);
+  for (let i = 0; i < id.data.length; i += 4) { id.data[i + 3] = Math.random() < .35 ? 90 + Math.random() * 165 : 0; }
+  x.putImageData(id, 0, 0); return c; })();
+
+function crayonPath(pts, color, width) {
+  wctx.save(); wctx.lineCap = 'round'; wctx.lineJoin = 'round'; wctx.strokeStyle = color;
+  for (let pass = 0; pass < 3; pass++) {
+    wctx.globalAlpha = pass === 0 ? .9 : .45; wctx.lineWidth = width * R * (1 - pass * .18);
+    wctx.beginPath();
+    pts.forEach((p, i) => { const jx = (Math.random() - .5) * .35 * pass, jy = (Math.random() - .5) * .35 * pass;
+      const X = (p[0] + .5 + jx) * R, Y = (p[1] + .5 + jy) * R; i ? wctx.lineTo(X, Y) : wctx.moveTo(X, Y); });
+    wctx.stroke();
+  }
+  wctx.restore();
+}
+function applyGrain() {
+  wctx.save(); wctx.globalCompositeOperation = 'destination-out'; wctx.globalAlpha = .45;
+  wctx.fillStyle = wctx.createPattern(grain, 'repeat'); wctx.fillRect(0, 0, wallC.width, wallC.height); wctx.restore();
+}
+function rasterLine(pts, rad, val = 1) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], len = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.ceil(len / .4));
+    for (let s = 0; s <= n; s++) stamp(x0 + (x1 - x0) * s / n, y0 + (y1 - y0) * s / n, rad, val);
+  }
+}
+function stamp(cx, cy, rad, val) {
+  const r2 = rad * rad;
+  for (let y = Math.floor(cy - rad); y <= Math.ceil(cy + rad); y++) for (let x = Math.floor(cx - rad); x <= Math.ceil(cx + rad); x++) {
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    if ((x - cx) ** 2 + (y - cy) ** 2 <= r2) { const i = y * W + x; wall[i] = val; if (val) water[i] = 0; }
+  }
+}
+function eraseAt(x, y, r) {
+  stamp(x, y, r, 0);
+  wctx.save(); wctx.globalCompositeOperation = 'destination-out';
+  const gr = wctx.createRadialGradient((x + .5) * R, (y + .5) * R, 0, (x + .5) * R, (y + .5) * R, r * R * 1.1);
+  gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(.8, 'rgba(0,0,0,.95)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  wctx.fillStyle = gr; wctx.beginPath(); wctx.arc((x + .5) * R, (y + .5) * R, r * R * 1.1, 0, 7); wctx.fill(); wctx.restore();
+}
+function rebuildWalls() {
+  wall.fill(0); wctx.clearRect(0, 0, wallC.width, wallC.height);
+  for (const s of LEVEL) { crayonPath(s.dense, CRAYON[s.c], 2.7); rasterLine(s.dense, 1.35); }
+  for (const op of ops) {
+    if (op.type === 'stroke') { crayonPath(op.pts, CRAYON.p, 2.2); rasterLine(op.pts, 1.15); }
+    else eraseAt(op.x, op.y, op.r);
+  }
+  applyGrain();
+  computeRegions();
+}
+function computeRegions() {
+  for (const s of LEVEL) if (s.poly) {
+    s.cells = [];
+    let x0 = W, x1 = 0, y0 = H, y1 = 0;
+    for (const [x, y] of s.poly) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    for (let y = Math.max(0, Math.floor(y0)); y <= Math.min(H - 1, Math.ceil(y1)); y++)
+      for (let x = Math.max(0, Math.floor(x0)); x <= Math.min(W - 1, Math.ceil(x1)); x++)
+        if (!wall[y * W + x] && inPoly(x, y, s.poly)) s.cells.push(y * W + x);
+  }
+}
+
+// ---------- Simulation ----------
+const K = .0035, CAP = 2.6;
+// Zähigkeit: rate = Simulationsschritte pro Bild (1 = eine Zelle pro Bild), side/spread = wie leicht es seitlich verläuft.
+// Bewusst langsamer als echtes Wasser, damit man den Strom planen und beobachten kann.
+// Zum Vergleich: flüssig {3, 1, 4} · weich {1.6, .8, 3} · mittel {1, .6, 2} · zäh {.6, .45, 2} · Honig {.35, .3, 1}
+const V = { rate: 1.3, side: .7, spread: 3 };
+const KS = K * 3 / V.rate * .5;
+let simAcc = 0;
+function simFrame() { simAcc += V.rate; while (simAcc >= 1) { step(); simAcc--; } }
+
+function move(i, j) {
+  water[j] = 1; water[i] = 0; moved[j] = tick;
+  pa[j * 3] = pa[i * 3]; pa[j * 3 + 1] = pa[i * 3 + 1]; pa[j * 3 + 2] = pa[i * 3 + 2];
+}
+const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
+function upd(x, y) {
+  const i = y * W + x;
+  if (!water[i] || moved[i] === tick) return;
+  // Pigment ins Papier
+  const b = i * 3;
+  wet[i] = 1;
+  // Deckel für den ganzen Farbvektor statt je Kanal: der Farbton bleibt erhalten, neue Farbe lasiert langsam darüber.
+  const s0 = stain[b] + KS * pa[b], s1 = stain[b + 1] + KS * pa[b + 1], s2 = stain[b + 2] + KS * pa[b + 2], mx = Math.max(s0, s1, s2), f = mx > CAP ? CAP / mx : 1;
+  stain[b] = s0 * f; stain[b + 1] = s1 * f; stain[b + 2] = s2 * f;
+  // Mischen mit einem Nachbarn
+  if (Math.random() < .5) {
+    const d = (Math.random() * 4) | 0, nx = x + [1, -1, 0, 0][d], ny = y + [0, 0, 1, -1][d];
+    if (inside(nx, ny)) { const j = ny * W + nx; if (water[j]) { const bj = j * 3;
+      for (let c = 0; c < 3; c++) { const m = (pa[bj + c] - pa[b + c]) * .18; pa[b + c] += m; pa[bj + c] -= m; } } }
+  }
+  const s = Math.random() < .5 ? 1 : -1;
+  // fallen: zwischen den zwei Nachbarrichtungen um die Schwerkraft zufällig wählen, im Mittel fällt es genau schräg
+  const p = Math.random() < gt ? (gk + 1) & 7 : gk, [fx, fy] = DIRS[p];
+  let r = fall(i, x, y, fx, fy, p & 1 ? -1 : 0, 0, 0);
+  if (r) return;
+  // schräg (nicht durch Wandecken)
+  for (const dir of [s, -s]) {
+    const [dx, dy] = DIRS[(p + dir) & 7];
+    if (fall(i, x, y, dx, dy, p & 1 ? 0 : 1, dx - fx, dy - fy)) return;
+  }
+  // seitlich verlaufen (bei zähem Wasser seltener und kürzer)
+  if (Math.random() > V.side) return;
+  for (const dir of [s, -s]) {
+    const [px, py] = DIRS[(p + 2 * dir) & 7];
+    let best = -1;
+    for (let k = 1; k <= V.spread; k++) {
+      const sx = x + px * k, sy = y + py * k;
+      if (!inside(sx, sy)) { water[i] = 0; return; }
+      const q = sy * W + sx; if (wall[q] || water[q]) break;
+      best = q;
+      const bx = sx + fx, by = sy + fy;
+      if (inside(bx, by) && !wall[by * W + bx] && !water[by * W + bx]) break;
+    }
+    if (best >= 0) { move(i, best); return; }
+  }
+}
+// Ein Schritt in Richtung (dx, dy). Wandecken: corner = -1 → nicht zwischen zwei Wänden durch (diagonale Schwerkraft),
+// corner = 1 → Seitenzelle (sx, sy) muss frei sein (wie beim geraden Fallen). true = erledigt (bewegt oder vom Blatt gefallen).
+function fall(i, x, y, dx, dy, corner, sx, sy) {
+  const nx = x + dx, ny = y + dy;
+  if (!inside(nx, ny)) { water[i] = 0; return true; }
+  if (dx && dy) {
+    if (corner === 1 && inside(x + sx, y + sy) && wall[(y + sy) * W + x + sx]) return false;
+    if (corner === -1 && wall[y * W + nx] && wall[ny * W + x]) return false;
+  }
+  const j = ny * W + nx;
+  if (wall[j] || water[j]) return false;
+  move(i, j); return true;
+}
+// Ein Trichter gießt, solange seine Kante höchstens ~44° von oben weggedreht ist.
+const pours = f => f.n[0] * gvec[0] + f.n[1] * gvec[1] > .72;
+function emit() {
+  for (const f of FUNNELS) {
+    if (!pours(f) || (!zen && f.left <= 0)) continue;
+    const px = -f.n[1], py = f.n[0];
+    for (let k = -2; k <= 2; k++) {
+      const x = f.x + px * k + f.n[0], y = f.y + py * k + f.n[1];
+      if (!inside(x, y) || Math.random() > (Math.abs(k) === 2 ? .35 : .8)) continue;
+      const i = y * W + x; if (wall[i] || water[i]) continue;
+      water[i] = 1; moved[i] = tick; pa[i * 3] = f.pig[0]; pa[i * 3 + 1] = f.pig[1]; pa[i * 3 + 2] = f.pig[2];
+      if (!zen) f.left--;
+    }
+  }
+}
+function step() {
+  tick++; setGravity();
+  const [gx, gy] = gvec, flip = tick & 1;
+  // von „unten“ her abarbeiten, damit Wasser nicht in einem Schritt mehrfach fällt
+  if (Math.abs(gy) >= Math.abs(gx)) {
+    for (let a = 0; a < H; a++) { const y = gy > 0 ? H - 1 - a : a;
+      for (let c = 0; c < W; c++) upd(flip ? c : W - 1 - c, y); }
+  } else {
+    for (let a = 0; a < W; a++) { const x = gx > 0 ? W - 1 - a : a;
+      for (let c = 0; c < H; c++) upd(x, flip ? c : H - 1 - c); }
+  }
+  emit();
+}
+
+// ---------- Zeichnen ----------
+// Nasse Stellen: Pigment verläuft zwischen nassen Nachbarzellen (nicht über Linien), Papier trocknet langsam.
+function bleed() {
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x; if (wet[i] < .25 || wall[i]) continue;
+    const b = i * 3;
+    for (const j of [i + 1, i + W]) {
+      if (wall[j] || wet[j] < .1) continue;
+      const bj = j * 3;
+      for (let c = 0; c < 3; c++) { const m = (stain[bj + c] - stain[b + c]) * .08; stain[b + c] += m; stain[bj + c] -= m; }
+    }
+  }
+}
+function dry() { for (let i = 0; i < N; i++) if (wet[i] > 0) wet[i] = wet[i] < .01 ? 0 : wet[i] * .993; }
+
+// Kantenverdunkelung: wo Farbe dichter ist als in ihrer Umgebung, trocknet sie dunkler an (wie der Rand einer Aquarell-Pfütze).
+function boxBlur(src, dst, r) {
+  for (let y = 0; y < H; y++) { let acc = 0; const row = y * W;
+    for (let x = -r; x <= r; x++) acc += src[row + Math.min(W - 1, Math.max(0, x))];
+    for (let x = 0; x < W; x++) { tmpBuf[row + x] = acc / (2 * r + 1);
+      acc += src[row + Math.min(W - 1, x + r + 1)] - src[row + Math.max(0, x - r)]; } }
+  for (let x = 0; x < W; x++) { let acc = 0;
+    for (let y = -r; y <= r; y++) acc += tmpBuf[Math.min(H - 1, Math.max(0, y)) * W + x];
+    for (let y = 0; y < H; y++) { dst[y * W + x] = acc / (2 * r + 1);
+      acc += tmpBuf[Math.min(H - 1, y + r + 1) * W + x] - tmpBuf[Math.max(0, y - r) * W + x]; } }
+}
+const FILTER = typeof ctx.filter === 'string';
+// Weichzeichnen auf kleinen Zwischen-Canvases (2 px pro Zelle), dann weich hochskalieren: billig auch auf dem Handy.
+const M = 2, midS = mk(W * M, H * M), midQ = mk(W * M, H * M), mS = midS.getContext('2d'), mQ = midQ.getContext('2d');
+function soft(dst, src, px) {
+  dst.clearRect(0, 0, W * M, H * M); dst.imageSmoothingEnabled = true;
+  if (FILTER) dst.filter = `blur(${px}px)`;
+  dst.drawImage(src, 0, 0, W * M, H * M);
+  if (FILTER) dst.filter = 'none';
+}
+function render() {
+  const sd = sImg.data, qd = qImg.data;
+  for (let i = 0, b = 0; i < N; i++, b += 3) sumBuf[i] = stain[b] + stain[b + 1] + stain[b + 2];
+  boxBlur(sumBuf, blurBuf, 2);
+  for (let i = 0, b = 0, o = 0; i < N; i++, b += 3, o += 4) {
+    const s = sumBuf[i], edge = s > .02 ? Math.max(0, s - blurBuf[i]) / (s + .15) : 0;
+    const f = .6 * gran[i] * (1 + 1.1 * edge), w = 1 - .08 * wet[i];
+    sd[o] = 255 * Math.exp(-stain[b] * f) * w; sd[o + 1] = 255 * Math.exp(-stain[b + 1] * f) * w; sd[o + 2] = 255 * Math.exp(-stain[b + 2] * f) * (1 - .05 * wet[i]); sd[o + 3] = 255;
+    if (water[i]) { qd[o] = 255 * Math.exp(-pa[b] * .6); qd[o + 1] = 255 * Math.exp(-pa[b + 1] * .6); qd[o + 2] = 255 * Math.exp(-pa[b + 2] * .6); qd[o + 3] = 200; }
+    else qd[o + 3] = 0;
+  }
+  sctx.putImageData(sImg, 0, 0); qctx.putImageData(qImg, 0, 0);
+  ctx.globalCompositeOperation = 'source-over'; ctx.drawImage(paperC, 0, 0);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  soft(mS, stainC, 1.4); soft(mQ, waterC, 1.8);
+  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(midS, 0, 0, cv.width, cv.height);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = .8; ctx.drawImage(midQ, 0, 0, cv.width, cv.height);
+  ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = .18; ctx.drawImage(midQ, -R * .6, -R * .6, cv.width, cv.height);   // Glanzkante oben links
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.drawImage(wallC, 0, 0);
+  drawDabs();
+  drawFunnels();
+}
+// Farbklecks je Ziel-Form: Ring = Zielfarbe, innen = Farbe, die die Form gerade hat, Haken = geschafft.
+function drawDabs() {
+  for (const s of GOALS) {
+    const x = (s.dab[0] + .5) * R, y = (s.dab[1] + .5) * R, r = 4.6 * R;
+    ctx.save();
+    ctx.fillStyle = mixCss(MIX[s.goal]); ctx.globalAlpha = .9;
+    ctx.beginPath(); for (let k = 0; k <= 16; k++) { const a = k / 16 * Math.PI * 2, q = r * (1 + .1 * Math.sin(a * 3 + s.dab[0]) + .05 * Math.sin(a * 7));
+      k ? ctx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q) : ctx.moveTo(x + Math.cos(a) * q, y + Math.sin(a) * q); }
+    ctx.fill();
+    ctx.globalAlpha = 1; ctx.fillStyle = s.color && s.cov > .1 ? mixCss(s.mix) : '#f7f4ee';
+    ctx.beginPath(); ctx.arc(x, y, r * .5, 0, 7); ctx.fill();
+    if (s.ok) { ctx.strokeStyle = '#1d1b1f'; ctx.lineWidth = .9 * R; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(x - r * .35, y); ctx.lineTo(x - r * .05, y + r * .3); ctx.lineTo(x + r * .4, y - r * .35); ctx.stroke(); }
+    ctx.restore();
+  }
+}
+function drawFunnels() {
+  for (const f of FUNNELS) {
+    const [nx, ny] = f.n, px = -ny, py = nx, cx = (f.x + .5) * R, cy = (f.y + .5) * R;
+    const pt = (u, v) => [cx + (px * u + nx * v) * R, cy + (py * u + ny * v) * R];
+    const fill = zen ? 1 : f.left / RES, active = pours(f);
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(...pt(-5, 0)); ctx.lineTo(...pt(5, 0)); ctx.lineTo(...pt(1, 5)); ctx.lineTo(...pt(-1, 5)); ctx.closePath();
+    ctx.fillStyle = f.col; ctx.globalAlpha = .18 + .72 * fill; ctx.fill();
+    ctx.globalAlpha = 1; ctx.strokeStyle = '#5a3522'; ctx.lineWidth = 2.6 * R; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(...pt(-8, 0)); ctx.lineTo(...pt(-3, 5)); ctx.moveTo(...pt(8, 0)); ctx.lineTo(...pt(3, 5)); ctx.stroke();
+    if (active && fill > 0) { ctx.fillStyle = f.col; ctx.globalAlpha = .9;
+      ctx.beginPath(); ctx.arc(...pt(0, 7.5), 1.1 * R, 0, 7); ctx.fill(); }
+    ctx.restore();
+  }
+}
+
+// ---------- Zielfarben ----------
+// Das Papier speichert Absorbanz je Kanal. Die lässt sich eindeutig in Blau-, Rot- und Gelb-Anteile zerlegen (3×3-System),
+// die nächstliegende Mischung aus MIX ist die Farbe der Form.
+const MIX = { blau: [1, 0, 0], rot: [0, 1, 0], gelb: [0, 0, 1], violett: [.5, .5, 0], 'grün': [.5, 0, .5], orange: [0, .5, .5], braun: [1 / 3, 1 / 3, 1 / 3] };
+const PM = [0, 1, 2].map(c => [PIG.blau[c], PIG.rot[c], PIG.gelb[c]]);   // Zeile = Kanal, Spalte = Pigment
+const det3 = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+const PMdet = det3(PM);
+function pigmentShares(a) {
+  const x = [0, 1, 2].map(k => Math.max(0, det3(PM.map((r, i) => r.map((v, j) => j === k ? a[i] : v))) / PMdet));
+  const t = x[0] + x[1] + x[2]; return t ? x.map(v => v / t) : x;
+}
+const mixName = m => Object.keys(MIX).reduce((best, k) => { const d = MIX[k].reduce((s, v, i) => s + (v - m[i]) ** 2, 0); return d < best.d ? { k, d } : best; }, { k: '', d: 9 }).k;
+const mixCss = m => { const a = [0, 1, 2].map(c => m[0] * PIG.blau[c] + m[1] * PIG.rot[c] + m[2] * PIG.gelb[c]);
+  return `rgb(${a.map(v => Math.round(247 * Math.exp(-v * .9))).join(',')})`; };
+
+// ---------- Fortschritt ----------
+const TARGETS = LEVEL.filter(s => s.poly), GOALS = TARGETS.filter(s => s.goal);
+let lastStars = 0;
+function progress() {
+  let sum = 0, done = 0, colors = 0;
+  for (const s of TARGETS) {
+    let c = 0;
+    for (const i of s.cells) { const b = i * 3; if (stain[b] + stain[b + 1] + stain[b + 2] > 1.1) c++; }
+    s.cov = s.cells.length ? c / s.cells.length : 0;
+    let ok = true;
+    if (s.goal) {
+      const a = [0, 0, 0];
+      for (const i of s.cells) { const b = i * 3; if (stain[b] + stain[b + 1] + stain[b + 2] > .3) for (let k = 0; k < 3; k++) a[k] += stain[b + k]; }
+      s.mix = pigmentShares(a); s.color = a[0] + a[1] + a[2] > 0 ? mixName(s.mix) : '';
+      ok = s.color === s.goal; s.ok = ok && s.cov >= .6; if (s.ok) colors++;
+    }
+    if (ok) { sum += Math.min(1, s.cov / .8); if (s.cov >= .6) done++; }   // falsche Farbe zählt nicht
+  }
+  const avg = sum / TARGETS.length, stars = avg >= .85 ? 3 : avg >= .6 ? 2 : avg >= .35 ? 1 : 0;
+  document.getElementById('filled').textContent = `${done} / ${TARGETS.length} Formen · Farben ${colors} / ${GOALS.length} · ${Math.round(avg * 100)} %`;
+  document.getElementById('stars').innerHTML = '<b>' + '★'.repeat(stars) + '</b>' + '★'.repeat(3 - stars);
+  if (stars > lastStars) toast(['', 'Erster Stern!', 'Zweiter Stern!', 'Drei Sterne. Das Bild ist fertig.'][stars]);
+  lastStars = stars;
+}
+let toastT;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toastT); toastT = setTimeout(() => t.style.opacity = 0, 2200); }
+
+// ---------- Layout & Drehen ----------
+const stage = document.getElementById('stage');
+let baseW, baseH, scale;
+function layout() {
+  const aw = stage.clientWidth - 8, ah = stage.clientHeight - 8;
+  baseH = Math.max(100, ah); baseW = baseH * W / H;
+  const a = ang * Math.PI / 180, c = Math.abs(Math.cos(a)), sn = Math.abs(Math.sin(a));
+  scale = Math.min(aw / (baseW * c + baseH * sn), ah / (baseW * sn + baseH * c));   // gedrehtes Blatt passt immer ganz hinein
+  cv.style.width = baseW + 'px'; cv.style.height = baseH + 'px';
+  cv.style.transform = `translate(-50%,-50%) rotate(${ang}deg) scale(${scale})`;
+}
+function setAng(a) { ang = a; layout(); document.getElementById('hint').hidden = true; }
+// Beim Loslassen rastet das Blatt ein, wenn es fast gerade steht.
+function snap() { const n = Math.round(ang / 90) * 90; if (Math.abs(ang - n) < 6) setAng(n); }
+// Halten von ⟲ ⟳ oder Q/E dreht gleichmäßig weiter.
+let spin = 0, spinT = 0;
+function spinLoop(t) { if (!spin) return; const dt = Math.min(50, t - (spinT || t)); spinT = t; setAng(ang + spin * dt * .09); requestAnimationFrame(spinLoop); }
+function startSpin(d) { if (spin === d) return; spin = d; spinT = 0; requestAnimationFrame(spinLoop); }
+function stopSpin() { if (!spin) return; spin = 0; snap(); }
+addEventListener('resize', layout);
+
+// ---------- Eingabe ----------
+function toGrid(e) {
+  const r = stage.getBoundingClientRect(), vx = e.clientX - (r.left + r.width / 2), vy = e.clientY - (r.top + r.height / 2);
+  const t = ang * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+  const ux = (vx * c + vy * s) / scale + baseW / 2, uy = (-vx * s + vy * c) / scale + baseH / 2;
+  return [ux / baseW * W - .5, uy / baseH * H - .5];
+}
+// Drehen: mit dem Drehen-Werkzeug auf dem Blatt oder mit jedem Werkzeug auf dem Tisch daneben ziehen.
+let turn = null;
+const ptrAng = e => { const r = stage.getBoundingClientRect(); return Math.atan2(e.clientY - r.top - r.height / 2, e.clientX - r.left - r.width / 2) * 180 / Math.PI; };
+stage.addEventListener('pointerdown', e => {
+  if (tool !== 'turn' && e.target === cv) return;
+  stage.setPointerCapture(e.pointerId); turn = { a0: ptrAng(e), ang0: ang };
+});
+stage.addEventListener('pointermove', e => {
+  if (!turn) return;
+  let d = ptrAng(e) - turn.a0; d -= Math.round(d / 360) * 360;
+  setAng(turn.ang0 + d); turn.ang0 = ang; turn.a0 = ptrAng(e);
+});
+const endTurn = () => { if (turn) { turn = null; snap(); } };
+stage.addEventListener('pointerup', endTurn); stage.addEventListener('pointercancel', endTurn);
+let wheelT;
+stage.addEventListener('wheel', e => { e.preventDefault(); setAng(ang + Math.sign(e.deltaY) * 4); clearTimeout(wheelT); wheelT = setTimeout(snap, 300); }, { passive: false });
+
+let cur = null;
+cv.addEventListener('pointerdown', e => {
+  if (tool === 'turn') return;
+  cv.setPointerCapture(e.pointerId);
+  const p = toGrid(e);
+  if (tool === 'erase') {
+    if (!zen && erasers <= 0) { toast('Kein Radierer mehr übrig'); return; }
+    const op = { type: 'erase', x: p[0], y: p[1], r: 3.2 };
+    ops.push(op); eraseAt(op.x, op.y, op.r); computeRegions(); if (!zen) erasers--; updTools(); return;
+  }
+  if (!zen && ink < 2) { toast('Die Tinte ist leer'); return; }
+  cur = { type: 'stroke', pts: [p], cost: 0 };
+});
+cv.addEventListener('pointermove', e => {
+  if (!cur) return;
+  const p = toGrid(e), q = cur.pts[cur.pts.length - 1], d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+  if (d < .9) return;
+  if (!zen && ink < d) { finish(); return; }
+  cur.pts.push(p); cur.cost += d; if (!zen) ink -= d;
+  crayonPath([q, p], CRAYON.p, 2.2); rasterLine([q, p], 1.15); updTools();
+});
+function finish() {
+  if (!cur) return;
+  if (cur.pts.length === 1) { cur.pts.push([cur.pts[0][0] + .2, cur.pts[0][1] + .2]); rasterLine(cur.pts, 1.15); crayonPath(cur.pts, CRAYON.p, 2.2); cur.cost = 1; if (!zen) ink -= 1; }
+  ops.push(cur); cur = null; computeRegions(); updTools();
+}
+cv.addEventListener('pointerup', finish); cv.addEventListener('pointercancel', finish);
+
+function undo() {
+  const op = ops.pop(); if (!op) return;
+  if (!zen) { if (op.type === 'stroke') ink = Math.min(inkMax, ink + op.cost); else erasers++; }
+  rebuildWalls(); updTools();
+}
+function setTool(t) { tool = t;
+  document.getElementById('toolTurn').setAttribute('aria-pressed', t === 'turn');
+  document.getElementById('toolPen').setAttribute('aria-pressed', t === 'pen');
+  document.getElementById('toolErase').setAttribute('aria-pressed', t === 'erase');
+  cv.style.cursor = t === 'erase' ? 'cell' : t === 'pen' ? 'crosshair' : 'grab'; }
+function updTools() {
+  document.getElementById('inkBar').style.width = (zen ? 100 : Math.max(0, ink / inkMax * 100)) + '%';
+  document.getElementById('eraseCount').textContent = zen ? '∞' : erasers;
+}
+function restart() {
+  water.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
+  for (const f of FUNNELS) f.left = RES;
+  rebuildWalls(); updTools(); progress();
+}
+for (const [id, d] of [['rotL', -1], ['rotR', 1]]) {
+  const b = document.getElementById(id);
+  b.addEventListener('pointerdown', e => { b.setPointerCapture(e.pointerId); startSpin(d); });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, stopSpin);
+  b.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAng(ang + d * 15); } });
+}
+document.getElementById('toolTurn').onclick = () => setTool('turn');
+
+// ---------- Neigungssensor ----------
+// Das Blatt bleibt auf dem Bildschirm stehen, das Handy selbst ist das Blatt: die echte Schwerkraft in der Bildschirmebene
+// kommt aus beta/gamma (Schwerkraft im Gerät = (sin γ·cos β, −sin β), Bildschirm-y zeigt nach unten) und wird zur Drehung addiert.
+const tiltBtn = document.getElementById('tiltBtn');
+let tiltOn = false, tiltSeen = false;
+if ('DeviceOrientationEvent' in window && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) tiltBtn.hidden = false;
+function onOrient(e) {
+  if (e.beta == null || e.gamma == null) return;
+  tiltSeen = true;
+  const b = e.beta * Math.PI / 180, c = e.gamma * Math.PI / 180;
+  let sx = Math.sin(c) * Math.cos(b), sy = Math.sin(b);
+  const so = (screen.orientation && screen.orientation.angle) || window.orientation || 0;   // Querformat: Gerät → Bildschirm drehen
+  if (so) { const r = -so * Math.PI / 180; [sx, sy] = [sx * Math.cos(r) - sy * Math.sin(r), sx * Math.sin(r) + sy * Math.cos(r)]; }
+  if (Math.hypot(sx, sy) < .12) return;              // liegt flach: Richtung unklar, letzte behalten
+  const t = Math.atan2(sx, sy) * 180 / Math.PI;
+  let d = t - tilt; d -= Math.round(d / 360) * 360;
+  tilt += d * .35;                                    // glätten gegen Zittern
+}
+async function toggleTilt() {
+  if (tiltOn) { tiltOn = false; removeEventListener('deviceorientation', onOrient); tilt = 0; tiltBtn.setAttribute('aria-pressed', false); toast('Neigen aus'); return; }
+  try {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {   // iOS fragt einmal nach Erlaubnis
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') { toast('Bewegungssensor nicht erlaubt'); return; }
+    }
+  } catch (err) { toast('Sensor hier gesperrt (eingebettete Seite?)'); return; }
+  tiltOn = true; tiltSeen = false; addEventListener('deviceorientation', onOrient); tiltBtn.setAttribute('aria-pressed', true);
+  document.getElementById('hint').hidden = true; toast('Neig das Handy');
+  setTimeout(() => { if (tiltOn && !tiltSeen) toast('Keine Sensordaten – evtl. blockiert die Einbettung'); }, 1500);
+}
+tiltBtn.onclick = toggleTilt;
+document.getElementById('toolPen').onclick = () => setTool('pen');
+document.getElementById('toolErase').onclick = () => setTool('erase');
+document.getElementById('undo').onclick = undo;
+document.getElementById('restart').onclick = restart;
+document.getElementById('zen').onclick = e => { zen = !zen; e.currentTarget.setAttribute('aria-pressed', zen); updTools(); toast(zen ? 'Zen: alles unbegrenzt' : 'Zen aus'); };
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'q' || k === 'arrowleft') startSpin(-1);
+  else if (k === 'e' || k === 'arrowright') startSpin(1);
+  else if (k === 'd') setTool('turn');
+  else if (k === 'z') undo();
+  else if (k === 'p') setTool('pen');
+  else if (k === 'r') setTool('erase');
+});
+addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (['q', 'e', 'arrowleft', 'arrowright'].includes(k)) stopSpin(); });
+
+// ---------- Loop ----------
+let frame = 0;
+function loop() {
+  simFrame();
+  dry(); if (frame % 3 === 0) bleed();
+  render();
+  if (++frame % 20 === 0) progress();
+  requestAnimationFrame(loop);
+}
+restart(); layout(); requestAnimationFrame(loop);
+// Test-Hilfe: n Frames ohne Warten vorspulen
+function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3 === 0) bleed(); } render(); progress(); }
+window.__aquarell = { step, advance, water, stain, TARGETS, GOALS, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
+})();
+</script>
+</body>
+</html>
