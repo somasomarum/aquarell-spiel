@@ -61,7 +61,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
   </header>
   <p class="hint" id="hint">Zieh am Blatt, um es zu kippen: Der Trichter oben gießt, der Strahl folgt der Neigung. Die Farbkleckse zeigen die Zielfarbe.</p>
   <div class="stage" id="stage"><canvas id="paper"></canvas><div id="toast"></div></div>
-  <div class="visc"><span>Wasser</span><input type="range" id="visc" min="0" max="4" step="0.05" value="1.5" aria-label="Zähigkeit: Wasser bis Honig"><span>Honig</span></div>
+  <div class="visc"><span>Wasser</span><input type="range" id="visc" min="0" max="4" step="0.05" value="2.1" aria-label="Zähigkeit: Wasser bis Honig"><span>Honig</span></div>
   <div class="tools">
     <button class="rot" id="rotL" title="Halten: gegen den Uhrzeigersinn drehen (Q)" aria-label="Nach links drehen">⟲</button>
     <button id="toolTurn" aria-pressed="true" title="Drehen: Blatt mit dem Finger oder der Maus kippen (D)">Drehen</button>
@@ -70,7 +70,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
     <button id="undo" title="Letzten Strich zurücknehmen (Z)">Zurück</button>
     <button id="restart" title="Blatt neu beginnen">Neu</button>
     <button id="tiltBtn" aria-pressed="false" hidden title="iPhone/Handy neigen statt ziehen">Neigen</button>
-    <button id="fluidBtn" aria-pressed="false" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: Sand</button>
+    <button id="fluidBtn" aria-pressed="true" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: flüssig</button>
     <button id="zen" aria-pressed="false" title="Unbegrenzt Wasser, Tinte und Radierer">Zen</button>
     <button class="rot" id="rotR" title="Halten: im Uhrzeigersinn drehen (E)" aria-label="Nach rechts drehen">⟳</button>
   </div>
@@ -79,8 +79,8 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 <script>
 (() => {
 // ---------- Version ----------
-// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 168dd92 ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.11', VERSION_NOTE = 'Schieber Zähigkeit: Wasser bis Honig', BUILD = '168dd92';
+// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 78c6256 ersetzt tools/pages.sh durch den Commit.
+const VERSION = '0.12', VERSION_NOTE = 'Neuer Standard: flüssig, Zähigkeit 2,1', BUILD = '78c6256';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -300,10 +300,10 @@ const K = .0035, CAP = 2.6;
 // Zähigkeit: rate = Simulationsschritte pro Bild (1 = eine Zelle pro Bild), side/spread = wie leicht es seitlich verläuft.
 // Bewusst langsamer als echtes Wasser, damit man den Strom planen und beobachten kann.
 // Zum Vergleich: flüssig {3, 1, 4} · weich {1.6, .8, 3} · mittel {1, .6, 2} · zäh {.6, .45, 2} · Honig {.35, .3, 1}
-// Schieber „Zähigkeit“: 0 = flüssig … 4 = Honig, dazwischen wird stufenlos interpoliert. Start 1.5 (zwischen weich und mittel).
+// Schieber „Zähigkeit“: 0 = flüssig … 4 = Honig, dazwischen wird stufenlos interpoliert. Start 2.1 (knapp hinter mittel, vom Nutzer als „super satisfying“ gewählt).
 const VISC = [[3, 1, 4], [1.6, .8, 3], [1, .6, 2], [.6, .45, 2], [.35, .3, 1]];
 const V = { rate: 1.3, side: .7, spread: 3 };
-let KS = K * 3 / V.rate * .5, visc = 1.5;
+let KS = K * 3 / V.rate * .5, visc = 2.1;
 function setVisc(z) {
   visc = Math.max(0, Math.min(4, z));
   const a = Math.min(3, Math.floor(visc)), t = visc - a, m = k => VISC[a][k] + (VISC[a + 1][k] - VISC[a][k]) * t;
@@ -418,7 +418,7 @@ function step() {
 // Ruhendes Wasser, das zusammenhängt, ist ein Wasserkörper. Liegt darin Wasser höher als eine freie Zelle an seinem Rand,
 // wandert die oberste Zelle dorthin: kommunizierende Röhren, ebene Oberflächen, Spiralen laufen innen voll.
 // Fallendes Wasser (in diesem Schritt bewegt) zählt nicht mit, sonst würde der Strahl in die Pfütze gesaugt.
-let fluid = false;
+let fluid = true;   // Standard seit v0.12: flüssig
 const pMark = new Uint32Array(N), eMark = new Uint32Array(N), pCells = new Int32Array(N), pEmpty = new Int32Array(N), pStack = new Int32Array(N);
 const pHc = new Float32Array(N), pHe = new Float32Array(N);
 // Luft: freie Zellen, die ohne Umweg durch Wasser mit dem Blattrand verbunden sind, sind „offen“. Alles andere ist
@@ -748,9 +748,11 @@ async function toggleTilt() {
   setTimeout(() => { if (tiltOn && !tiltSeen) toast('Keine Sensordaten – evtl. blockiert die Einbettung'); }, 1500);
 }
 tiltBtn.onclick = toggleTilt;
-function toggleFluid() { fluid = !fluid; const b = document.getElementById('fluidBtn');
-  b.textContent = fluid ? 'Wasser: flüssig' : 'Wasser: Sand'; b.setAttribute('aria-pressed', fluid);
+function showFluid() { const b = document.getElementById('fluidBtn');
+  b.textContent = fluid ? 'Wasser: flüssig' : 'Wasser: Sand'; b.setAttribute('aria-pressed', fluid); }
+function toggleFluid() { fluid = !fluid; showFluid(); try { localStorage.setItem('aquarell-fluid', fluid ? '1' : '0'); } catch (e) {}
   toast(fluid ? 'Flüssig: Wasser hat Druck' : 'Sand: Wasser rieselt'); }
+try { const f = localStorage.getItem('aquarell-fluid'); if (f === '0' || f === '1') { fluid = f === '1'; showFluid(); } } catch (e) {}
 document.getElementById('fluidBtn').onclick = toggleFluid;
 // Zähigkeit: Schieber, im Browser gemerkt
 const viscIn = document.getElementById('visc');
