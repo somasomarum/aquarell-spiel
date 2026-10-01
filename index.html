@@ -76,8 +76,8 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 <script>
 (() => {
 // ---------- Version ----------
-// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. a08c42f ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.8', VERSION_NOTE = 'Schalter Wasser: Sand / flüssig (Druck)', BUILD = 'a08c42f';
+// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 95b6a08 ersetzt tools/pages.sh durch den Commit.
+const VERSION = '0.9', VERSION_NOTE = 'Stehendes Wasser liegt ruhig (kein Kribbeln mehr)', BUILD = '95b6a08';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -91,6 +91,7 @@ const gran = new Float32Array(N);                    // Papierkorn: manche Stell
 for (let i = 0; i < N; i++) gran[i] = .82 + Math.random() * .36;
 const sumBuf = new Float32Array(N), blurBuf = new Float32Array(N), tmpBuf = new Float32Array(N);
 const moved = new Uint32Array(N);
+const mom = new Int8Array(N);                        // Schwung beim seitlichen Rutschen: −1/+1, 0 = liegt ruhig
 const drift = new Float32Array(N);                   // je Wassertropfen: aufgelaufener Schräganteil (wie Bresenham), damit schräge Strahlen zusammenbleiben
 const qW = new Float32Array(N), qWb = new Float32Array(N), qP = [0, 1, 2].map(() => new Float32Array(N)), qPb = [0, 1, 2].map(() => new Float32Array(N));
 let tick = 1;
@@ -302,7 +303,7 @@ let simAcc = 0;
 function simFrame() { simAcc += V.rate; while (simAcc >= 1) { step(); simAcc--; } }
 
 function move(i, j) {
-  water[j] = 1; water[i] = 0; moved[j] = tick; drift[j] = drift[i];
+  water[j] = 1; water[i] = 0; moved[j] = tick; drift[j] = drift[i]; mom[j] = mom[i];
   pa[j * 3] = pa[i * 3]; pa[j * 3 + 1] = pa[i * 3 + 1]; pa[j * 3 + 2] = pa[i * 3 + 2];
 }
 const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
@@ -327,28 +328,36 @@ function upd(x, y) {
   if (dr >= 1) { dr -= 1; p = (gk + 1) & 7; }
   drift[i] = dr;
   const [fx, fy] = DIRS[p];
-  let r = fall(i, x, y, fx, fy, p & 1 ? -1 : 0, 0, 0);
-  if (r) return;
+  if (fall(i, x, y, fx, fy, p & 1 ? -1 : 0, 0, 0)) { if (inside(x + fx, y + fy)) mom[(y + fy) * W + x + fx] = s; return; }   // gefallen: neuer Schwung
   // schräg (nicht durch Wandecken)
   for (const dir of [s, -s]) {
     const [dx, dy] = DIRS[(p + dir) & 7];
-    if (fall(i, x, y, dx, dy, p & 1 ? 0 : 1, dx - fx, dy - fy)) return;
+    if (fall(i, x, y, dx, dy, p & 1 ? 0 : 1, dx - fx, dy - fy)) { if (water[i] === 0 && inside(x + dx, y + dy)) mom[(y + dy) * W + x + dx] = dir; return; }
   }
-  // seitlich verlaufen (bei zähem Wasser seltener und kürzer)
+  // seitlich verlaufen (bei zähem Wasser seltener und kürzer): zuerst dorthin, wo es tiefer geht,
+  // sonst mit Schwung in eine Richtung weiter, bis es anstößt – dann liegt es ruhig (kein Hin-und-her-Wuseln auf Pfützen).
   if (Math.random() > V.side) return;
   for (const dir of [s, -s]) {
     const [px, py] = DIRS[(p + 2 * dir) & 7];
-    let best = -1;
     for (let k = 1; k <= V.spread; k++) {
       const sx = x + px * k, sy = y + py * k;
       if (!inside(sx, sy)) { water[i] = 0; return; }
       const q = sy * W + sx; if (wall[q] || water[q]) break;
-      best = q;
       const bx = sx + fx, by = sy + fy;
-      if (inside(bx, by) && !wall[by * W + bx] && !water[by * W + bx]) break;
+      if (inside(bx, by) && !wall[by * W + bx] && !water[by * W + bx]) { move(i, q); mom[q] = dir; return; }
     }
-    if (best >= 0) { move(i, best); return; }
   }
+  const md = mom[i];
+  if (!md) return;
+  const [px, py] = DIRS[(p + 2 * md) & 7];
+  let best = -1;
+  for (let k = 1; k <= V.spread; k++) {
+    const sx = x + px * k, sy = y + py * k;
+    if (!inside(sx, sy)) { water[i] = 0; return; }
+    const q = sy * W + sx; if (wall[q] || water[q]) break;
+    best = q;
+  }
+  if (best >= 0) move(i, best); else mom[i] = 0;
 }
 // Ein Schritt in Richtung (dx, dy). Wandecken: corner = -1 → nicht zwischen zwei Wänden durch (diagonale Schwerkraft),
 // corner = 1 → Seitenzelle (sx, sy) muss frei sein (wie beim geraden Fallen). true = erledigt (bewegt oder vom Blatt gefallen).
@@ -373,7 +382,7 @@ function emit() {
       const x = f.x + px * k + f.n[0], y = f.y + py * k + f.n[1];
       if (!inside(x, y) || Math.random() > (Math.abs(k) === 2 ? .35 : .8)) continue;
       const i = y * W + x; if (wall[i] || water[i]) continue;
-      water[i] = 1; moved[i] = tick; drift[i] = Math.random(); pa[i * 3] = f.pig[0]; pa[i * 3 + 1] = f.pig[1]; pa[i * 3 + 2] = f.pig[2];
+      water[i] = 1; moved[i] = tick; drift[i] = Math.random(); mom[i] = 0; pa[i * 3] = f.pig[0]; pa[i * 3 + 1] = f.pig[1]; pa[i * 3 + 2] = f.pig[2];
       if (!zen) f.left--;
     }
   }
@@ -432,7 +441,7 @@ function pressure(gx, gy) {
       for (let a = 0; a < ne; a++) if (pHe[a] < bh) { bh = pHe[a]; bi = a; }
       if (th - bh < 1.5) break;
       const from = pCells[ti], to = pEmpty[bi];
-      move(from, to);
+      move(from, to); mom[to] = 0;
       pCells[ti] = to; pHc[ti] = bh; ne--; pEmpty[bi] = pEmpty[ne]; pHe[bi] = pHe[ne];
       if (!ne) break;
     }
@@ -670,7 +679,7 @@ function updTools() {
   document.getElementById('eraseCount').textContent = zen ? '∞' : erasers;
 }
 function restart() {
-  water.fill(0); drift.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
+  water.fill(0); drift.fill(0); mom.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
   for (const f of FUNNELS) f.left = RES;
   rebuildWalls(); updTools(); progress();
 }
