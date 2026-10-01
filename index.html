@@ -46,6 +46,8 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 .count{font-variant-numeric:tabular-nums;color:var(--muted)}
 .hint{font-family:var(--display);color:var(--muted);text-align:center;font-size:1rem;margin:0;padding-bottom:2px}
 .sep{width:1px;background:var(--chip-line);margin-inline:2px}
+.visc{display:flex;align-items:center;justify-content:center;gap:10px;padding-top:6px;font:600 .8rem var(--body);color:var(--muted)}
+.visc input{width:min(260px,55vw);accent-color:var(--accent)}
 @media (max-width:480px){.tools{gap:5px}.tools button{padding:6px 8px;font-size:.8rem;gap:5px;min-height:38px}.tools .rot{padding-inline:10px}.meter{width:26px}}
 #toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--paper);color:#2a2026;
   font-family:var(--display);font-size:1.2rem;padding:6px 16px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.4);
@@ -59,6 +61,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
   </header>
   <p class="hint" id="hint">Zieh am Blatt, um es zu kippen: Der Trichter oben gießt, der Strahl folgt der Neigung. Die Farbkleckse zeigen die Zielfarbe.</p>
   <div class="stage" id="stage"><canvas id="paper"></canvas><div id="toast"></div></div>
+  <div class="visc"><span>Wasser</span><input type="range" id="visc" min="0" max="4" step="0.05" value="1.5" aria-label="Zähigkeit: Wasser bis Honig"><span>Honig</span></div>
   <div class="tools">
     <button class="rot" id="rotL" title="Halten: gegen den Uhrzeigersinn drehen (Q)" aria-label="Nach links drehen">⟲</button>
     <button id="toolTurn" aria-pressed="true" title="Drehen: Blatt mit dem Finger oder der Maus kippen (D)">Drehen</button>
@@ -76,8 +79,8 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 <script>
 (() => {
 // ---------- Version ----------
-// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 973020d ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.10', VERSION_NOTE = 'Flüssig: eingeschlossene Luft hält Wasser auf (Spiralmitte nur durch Drehen)', BUILD = '973020d';
+// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 168dd92 ersetzt tools/pages.sh durch den Commit.
+const VERSION = '0.11', VERSION_NOTE = 'Schieber Zähigkeit: Wasser bis Honig', BUILD = '168dd92';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -297,8 +300,17 @@ const K = .0035, CAP = 2.6;
 // Zähigkeit: rate = Simulationsschritte pro Bild (1 = eine Zelle pro Bild), side/spread = wie leicht es seitlich verläuft.
 // Bewusst langsamer als echtes Wasser, damit man den Strom planen und beobachten kann.
 // Zum Vergleich: flüssig {3, 1, 4} · weich {1.6, .8, 3} · mittel {1, .6, 2} · zäh {.6, .45, 2} · Honig {.35, .3, 1}
+// Schieber „Zähigkeit“: 0 = flüssig … 4 = Honig, dazwischen wird stufenlos interpoliert. Start 1.5 (zwischen weich und mittel).
+const VISC = [[3, 1, 4], [1.6, .8, 3], [1, .6, 2], [.6, .45, 2], [.35, .3, 1]];
 const V = { rate: 1.3, side: .7, spread: 3 };
-const KS = K * 3 / V.rate * .5;
+let KS = K * 3 / V.rate * .5, visc = 1.5;
+function setVisc(z) {
+  visc = Math.max(0, Math.min(4, z));
+  const a = Math.min(3, Math.floor(visc)), t = visc - a, m = k => VISC[a][k] + (VISC[a + 1][k] - VISC[a][k]) * t;
+  V.rate = m(0); V.side = m(1); V.spread = Math.round(m(2));
+  KS = K * 3 / V.rate * .5;   // Farbauftrag pro Sekunde bleibt gleich, egal wie zäh
+}
+setVisc(visc);
 let simAcc = 0;
 function simFrame() { simAcc += V.rate; while (simAcc >= 1) { step(); simAcc--; } }
 
@@ -740,6 +752,10 @@ function toggleFluid() { fluid = !fluid; const b = document.getElementById('flui
   b.textContent = fluid ? 'Wasser: flüssig' : 'Wasser: Sand'; b.setAttribute('aria-pressed', fluid);
   toast(fluid ? 'Flüssig: Wasser hat Druck' : 'Sand: Wasser rieselt'); }
 document.getElementById('fluidBtn').onclick = toggleFluid;
+// Zähigkeit: Schieber, im Browser gemerkt
+const viscIn = document.getElementById('visc');
+try { const v = parseFloat(localStorage.getItem('aquarell-visc')); if (v >= 0 && v <= 4) { viscIn.value = v; setVisc(v); } } catch (e) {}
+viscIn.addEventListener('input', () => { setVisc(+viscIn.value); try { localStorage.setItem('aquarell-visc', viscIn.value); } catch (e) {} });
 document.getElementById('toolPen').onclick = () => setTool('pen');
 document.getElementById('toolErase').onclick = () => setTool('erase');
 document.getElementById('undo').onclick = undo;
@@ -769,7 +785,7 @@ function loop() {
 restart(); layout(); requestAnimationFrame(loop);
 // Test-Hilfe: n Frames ohne Warten vorspulen
 function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3 === 0) bleed(); } render(); progress(); }
-window.__aquarell = { step, advance, water, stain, TARGETS, GOALS, setFluid: v => { fluid = v; }, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
+window.__aquarell = { step, advance, water, stain, TARGETS, GOALS, setFluid: v => { fluid = v; }, setVisc, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
 })();
 </script>
 </body>
