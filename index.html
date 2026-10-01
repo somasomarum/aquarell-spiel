@@ -27,6 +27,7 @@ body{background:var(--table);color:var(--ink);font-family:var(--body);margin:0;
 header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-block:10px 4px;flex-wrap:wrap}
 h1{font-family:var(--display);font-weight:700;font-size:1.9rem;margin:0;line-height:1;letter-spacing:.01em}
 h1 span{color:var(--blau);filter:brightness(1.4)}
+.ver{font:600 .72rem var(--body);color:var(--muted);opacity:.75;margin-left:8px;letter-spacing:.02em;cursor:help;font-variant-numeric:tabular-nums}
 .score{display:flex;align-items:baseline;gap:12px;font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem}
 .stars{font-size:1.3rem;letter-spacing:.1em;color:var(--chip-line)}
 .stars b{color:var(--accent);font-weight:400}
@@ -53,7 +54,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 
 <div class="app">
   <header>
-    <h1>Aqua<span>rell</span></h1>
+    <h1>Aqua<span>rell</span><small class="ver" id="ver"></small></h1>
     <div class="score"><span id="filled">0 / 0 Formen gefüllt</span><span class="stars" id="stars" aria-label="Sterne">★★★</span></div>
   </header>
   <p class="hint" id="hint">Zieh am Blatt, um es zu kippen: Der Trichter oben gießt, der Strahl folgt der Neigung. Die Farbkleckse zeigen die Zielfarbe.</p>
@@ -74,6 +75,12 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 
 <script>
 (() => {
+// ---------- Version ----------
+// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. a08c42f ersetzt tools/pages.sh durch den Commit.
+const VERSION = '0.8', VERSION_NOTE = 'Schalter Wasser: Sand / flüssig (Druck)', BUILD = 'a08c42f';
+{ const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
+  v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
+
 // ---------- Raster ----------
 const W = 150, H = 210, N = W * H, R = 6;          // Zellen, Pixel pro Zelle
 const wall = new Uint8Array(N), water = new Uint8Array(N);
