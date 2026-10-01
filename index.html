@@ -66,6 +66,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
     <button id="undo" title="Letzten Strich zurücknehmen (Z)">Zurück</button>
     <button id="restart" title="Blatt neu beginnen">Neu</button>
     <button id="tiltBtn" aria-pressed="false" hidden title="iPhone/Handy neigen statt ziehen">Neigen</button>
+    <button id="fluidBtn" aria-pressed="false" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: Sand</button>
     <button id="zen" aria-pressed="false" title="Unbegrenzt Wasser, Tinte und Radierer">Zen</button>
     <button class="rot" id="rotR" title="Halten: im Uhrzeigersinn drehen (E)" aria-label="Nach rechts drehen">⟳</button>
   </div>
@@ -381,7 +382,54 @@ function step() {
     for (let a = 0; a < W; a++) { const x = gx > 0 ? W - 1 - a : a;
       for (let c = 0; c < H; c++) upd(x, flip ? c : H - 1 - c); }
   }
+  if (fluid) pressure(gx, gy);
   emit();
+}
+
+// ---------- Druck (Schalter „Wasser: flüssig“) ----------
+// Ruhendes Wasser, das zusammenhängt, ist ein Wasserkörper. Liegt darin Wasser höher als eine freie Zelle an seinem Rand,
+// wandert die oberste Zelle dorthin: kommunizierende Röhren, ebene Oberflächen, Spiralen laufen innen voll.
+// Fallendes Wasser (in diesem Schritt bewegt) zählt nicht mit, sonst würde der Strahl in die Pfütze gesaugt.
+let fluid = false;
+const pMark = new Uint32Array(N), eMark = new Uint32Array(N), pCells = new Int32Array(N), pEmpty = new Int32Array(N), pStack = new Int32Array(N);
+const pHc = new Float32Array(N), pHe = new Float32Array(N);
+let pTick = 0;
+function pressure(gx, gy) {
+  if (tick & 1) return;                                   // nur jeden zweiten Schritt, dafür mehr Zellen auf einmal
+  const h = i => -((i % W) * gx + ((i / W) | 0) * gy) + Math.random() * .01;   // Höhe entgegen der Schwerkraft
+  const first = pTick + 1;                                 // alle Körper dieses Aufrufs haben pTick ≥ first
+  for (let s0 = 0; s0 < N; s0++) {
+    if (!water[s0] || moved[s0] === tick || pMark[s0] >= first) continue;
+    pTick++;
+    let nc = 0, ne = 0, sp = 0; pStack[sp++] = s0; pMark[s0] = pTick;
+    while (sp) {
+      const i = pStack[--sp], x = i % W, y = (i / W) | 0; pHc[nc] = h(i); pCells[nc++] = i;
+      for (let d = 0; d < 4; d++) {
+        const nx = x + (d === 0) - (d === 1), ny = y + (d === 2) - (d === 3);
+        if (!inside(nx, ny)) continue;
+        const j = ny * W + nx;
+        if (wall[j]) continue;
+        if (water[j]) { if (moved[j] !== tick && pMark[j] < first) { pMark[j] = pTick; pStack[sp++] = j; } }
+        else if (eMark[j] !== pTick) { eMark[j] = pTick; pHe[ne] = h(j); pEmpty[ne++] = j; }
+      }
+    }
+    if (nc < 3 || !ne) continue;
+    let mx = -1e9, mn = 1e9;                             // schon ausgeglichen? (der Normalfall) → nichts zu tun
+    for (let a = 0; a < nc; a++) if (pHc[a] > mx) mx = pHc[a];
+    for (let a = 0; a < ne; a++) if (pHe[a] < mn) mn = pHe[a];
+    if (mx - mn < 1.5) continue;
+    const moves = Math.min(24, 4 + (nc >> 4));
+    for (let k = 0; k < moves; k++) {
+      let ti = 0, bi = 0, th = -1e9, bh = 1e9;
+      for (let a = 0; a < nc; a++) if (pHc[a] > th) { th = pHc[a]; ti = a; }
+      for (let a = 0; a < ne; a++) if (pHe[a] < bh) { bh = pHe[a]; bi = a; }
+      if (th - bh < 1.5) break;
+      const from = pCells[ti], to = pEmpty[bi];
+      move(from, to);
+      pCells[ti] = to; pHc[ti] = bh; ne--; pEmpty[bi] = pEmpty[ne]; pHe[bi] = pHe[ne];
+      if (!ne) break;
+    }
+  }
 }
 
 // ---------- Zeichnen ----------
@@ -658,6 +706,10 @@ async function toggleTilt() {
   setTimeout(() => { if (tiltOn && !tiltSeen) toast('Keine Sensordaten – evtl. blockiert die Einbettung'); }, 1500);
 }
 tiltBtn.onclick = toggleTilt;
+function toggleFluid() { fluid = !fluid; const b = document.getElementById('fluidBtn');
+  b.textContent = fluid ? 'Wasser: flüssig' : 'Wasser: Sand'; b.setAttribute('aria-pressed', fluid);
+  toast(fluid ? 'Flüssig: Wasser hat Druck' : 'Sand: Wasser rieselt'); }
+document.getElementById('fluidBtn').onclick = toggleFluid;
 document.getElementById('toolPen').onclick = () => setTool('pen');
 document.getElementById('toolErase').onclick = () => setTool('erase');
 document.getElementById('undo').onclick = undo;
@@ -668,6 +720,7 @@ addEventListener('keydown', e => {
   if (k === 'q' || k === 'arrowleft') startSpin(-1);
   else if (k === 'e' || k === 'arrowright') startSpin(1);
   else if (k === 'd') setTool('turn');
+  else if (k === 'w') toggleFluid();
   else if (k === 'z') undo();
   else if (k === 'p') setTool('pen');
   else if (k === 'r') setTool('erase');
@@ -686,7 +739,7 @@ function loop() {
 restart(); layout(); requestAnimationFrame(loop);
 // Test-Hilfe: n Frames ohne Warten vorspulen
 function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3 === 0) bleed(); } render(); progress(); }
-window.__aquarell = { step, advance, water, stain, TARGETS, GOALS, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
+window.__aquarell = { step, advance, water, stain, TARGETS, GOALS, setFluid: v => { fluid = v; }, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
 })();
 </script>
 </body>
