@@ -76,8 +76,8 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 <script>
 (() => {
 // ---------- Version ----------
-// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 95b6a08 ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.9', VERSION_NOTE = 'Stehendes Wasser liegt ruhig (kein Kribbeln mehr)', BUILD = '95b6a08';
+// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 973020d ersetzt tools/pages.sh durch den Commit.
+const VERSION = '0.10', VERSION_NOTE = 'Flüssig: eingeschlossene Luft hält Wasser auf (Spiralmitte nur durch Drehen)', BUILD = '973020d';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -409,11 +409,25 @@ function step() {
 let fluid = false;
 const pMark = new Uint32Array(N), eMark = new Uint32Array(N), pCells = new Int32Array(N), pEmpty = new Int32Array(N), pStack = new Int32Array(N);
 const pHc = new Float32Array(N), pHe = new Float32Array(N);
+// Luft: freie Zellen, die ohne Umweg durch Wasser mit dem Blattrand verbunden sind, sind „offen“. Alles andere ist
+// eingeschlossene Luft (z. B. hinter einem Wasserpfropfen in der Spirale) – dorthin drückt der Druck kein Wasser.
+const airOpen = new Uint32Array(N); let airTick = 0;
+function markOpenAir() {
+  airTick++; let sp = 0;
+  const seed = i => { if (!wall[i] && !water[i] && airOpen[i] !== airTick) { airOpen[i] = airTick; pStack[sp++] = i; } };
+  for (let x = 0; x < W; x++) { seed(x); seed((H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { seed(y * W); seed(y * W + W - 1); }
+  while (sp) {
+    const i = pStack[--sp], x = i % W;
+    if (x > 0) seed(i - 1); if (x < W - 1) seed(i + 1); if (i >= W) seed(i - W); if (i < N - W) seed(i + W);
+  }
+}
 let pTick = 0;
 function pressure(gx, gy) {
   if (tick & 1) return;                                   // nur jeden zweiten Schritt, dafür mehr Zellen auf einmal
   const h = i => -((i % W) * gx + ((i / W) | 0) * gy) + Math.random() * .01;   // Höhe entgegen der Schwerkraft
   const first = pTick + 1;                                 // alle Körper dieses Aufrufs haben pTick ≥ first
+  markOpenAir();
   for (let s0 = 0; s0 < N; s0++) {
     if (!water[s0] || moved[s0] === tick || pMark[s0] >= first) continue;
     pTick++;
@@ -426,7 +440,7 @@ function pressure(gx, gy) {
         const j = ny * W + nx;
         if (wall[j]) continue;
         if (water[j]) { if (moved[j] !== tick && pMark[j] < first) { pMark[j] = pTick; pStack[sp++] = j; } }
-        else if (eMark[j] !== pTick) { eMark[j] = pTick; pHe[ne] = h(j); pEmpty[ne++] = j; }
+        else if (eMark[j] !== pTick && airOpen[j] === airTick) { eMark[j] = pTick; pHe[ne] = h(j); pEmpty[ne++] = j; }
       }
     }
     if (nc < 3 || !ne) continue;
