@@ -83,6 +83,8 @@ const gran = new Float32Array(N);                    // Papierkorn: manche Stell
 for (let i = 0; i < N; i++) gran[i] = .82 + Math.random() * .36;
 const sumBuf = new Float32Array(N), blurBuf = new Float32Array(N), tmpBuf = new Float32Array(N);
 const moved = new Uint32Array(N);
+const drift = new Float32Array(N);                   // je Wassertropfen: aufgelaufener Schräganteil (wie Bresenham), damit schräge Strahlen zusammenbleiben
+const qW = new Float32Array(N), qWb = new Float32Array(N), qP = [0, 1, 2].map(() => new Float32Array(N)), qPb = [0, 1, 2].map(() => new Float32Array(N));
 let tick = 1;
 
 const absOf = hex => { const n = parseInt(hex.slice(1), 16);
@@ -292,7 +294,7 @@ let simAcc = 0;
 function simFrame() { simAcc += V.rate; while (simAcc >= 1) { step(); simAcc--; } }
 
 function move(i, j) {
-  water[j] = 1; water[i] = 0; moved[j] = tick;
+  water[j] = 1; water[i] = 0; moved[j] = tick; drift[j] = drift[i];
   pa[j * 3] = pa[i * 3]; pa[j * 3 + 1] = pa[i * 3 + 1]; pa[j * 3 + 2] = pa[i * 3 + 2];
 }
 const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
@@ -312,8 +314,11 @@ function upd(x, y) {
       for (let c = 0; c < 3; c++) { const m = (pa[bj + c] - pa[b + c]) * .18; pa[b + c] += m; pa[bj + c] -= m; } } }
   }
   const s = Math.random() < .5 ? 1 : -1;
-  // fallen: zwischen den zwei Nachbarrichtungen um die Schwerkraft zufällig wählen, im Mittel fällt es genau schräg
-  const p = Math.random() < gt ? (gk + 1) & 7 : gk, [fx, fy] = DIRS[p];
+  // fallen: zwischen den zwei Nachbarrichtungen um die Schwerkraft gleichmäßig abwechseln, im Mittel fällt es genau schräg
+  let dr = drift[i] + gt, p = gk;
+  if (dr >= 1) { dr -= 1; p = (gk + 1) & 7; }
+  drift[i] = dr;
+  const [fx, fy] = DIRS[p];
   let r = fall(i, x, y, fx, fy, p & 1 ? -1 : 0, 0, 0);
   if (r) return;
   // schräg (nicht durch Wandecken)
@@ -360,7 +365,7 @@ function emit() {
       const x = f.x + px * k + f.n[0], y = f.y + py * k + f.n[1];
       if (!inside(x, y) || Math.random() > (Math.abs(k) === 2 ? .35 : .8)) continue;
       const i = y * W + x; if (wall[i] || water[i]) continue;
-      water[i] = 1; moved[i] = tick; pa[i * 3] = f.pig[0]; pa[i * 3 + 1] = f.pig[1]; pa[i * 3 + 2] = f.pig[2];
+      water[i] = 1; moved[i] = tick; drift[i] = Math.random(); pa[i * 3] = f.pig[0]; pa[i * 3 + 1] = f.pig[1]; pa[i * 3 + 2] = f.pig[2];
       if (!zen) f.left--;
     }
   }
@@ -418,17 +423,25 @@ function render() {
   const sd = sImg.data, qd = qImg.data;
   for (let i = 0, b = 0; i < N; i++, b += 3) sumBuf[i] = stain[b] + stain[b + 1] + stain[b + 2];
   boxBlur(sumBuf, blurBuf, 2);
+  // Wasser als zusammenhängende Fläche: Dichte weichzeichnen und mit einer Schwelle schneiden (wie Metaballs),
+  // einzelne Zellen verschwinden, benachbarte verschmelzen. Farbe = gemittelte Pigmente der Nachbarn.
+  for (let i = 0, b = 0; i < N; i++, b += 3) { const w = water[i]; qW[i] = w; qP[0][i] = w * pa[b]; qP[1][i] = w * pa[b + 1]; qP[2][i] = w * pa[b + 2]; }
+  boxBlur(qW, qWb, 1); for (let c = 0; c < 3; c++) boxBlur(qP[c], qPb[c], 1);
   for (let i = 0, b = 0, o = 0; i < N; i++, b += 3, o += 4) {
     const s = sumBuf[i], edge = s > .02 ? Math.max(0, s - blurBuf[i]) / (s + .15) : 0;
     const f = .6 * gran[i] * (1 + 1.1 * edge), w = 1 - .08 * wet[i];
     sd[o] = 255 * Math.exp(-stain[b] * f) * w; sd[o + 1] = 255 * Math.exp(-stain[b + 1] * f) * w; sd[o + 2] = 255 * Math.exp(-stain[b + 2] * f) * (1 - .05 * wet[i]); sd[o + 3] = 255;
-    if (water[i]) { qd[o] = 255 * Math.exp(-pa[b] * .6); qd[o + 1] = 255 * Math.exp(-pa[b + 1] * .6); qd[o + 2] = 255 * Math.exp(-pa[b + 2] * .6); qd[o + 3] = 200; }
-    else qd[o + 3] = 0;
+    const dn = qWb[i];
+    if (dn > .2) {
+      const a = Math.min(1, (dn - .2) / .3), k = .6 / dn, rim = 1 - .22 * (1 - a);   // Rand etwas dunkler, wie eine Wasserkante
+      qd[o] = 255 * Math.exp(-qPb[0][i] * k) * rim; qd[o + 1] = 255 * Math.exp(-qPb[1][i] * k) * rim; qd[o + 2] = 255 * Math.exp(-qPb[2][i] * k) * rim;
+      qd[o + 3] = 215 * a * a * (3 - 2 * a);
+    } else qd[o + 3] = 0;
   }
   sctx.putImageData(sImg, 0, 0); qctx.putImageData(qImg, 0, 0);
   ctx.globalCompositeOperation = 'source-over'; ctx.drawImage(paperC, 0, 0);
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  soft(mS, stainC, 1.4); soft(mQ, waterC, 1.8);
+  soft(mS, stainC, 1.4); soft(mQ, waterC, 1.1);
   ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(midS, 0, 0, cv.width, cv.height);
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = .8; ctx.drawImage(midQ, 0, 0, cv.width, cv.height);
@@ -602,7 +615,7 @@ function updTools() {
   document.getElementById('eraseCount').textContent = zen ? '∞' : erasers;
 }
 function restart() {
-  water.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
+  water.fill(0); drift.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
   for (const f of FUNNELS) f.left = RES;
   rebuildWalls(); updTools(); progress();
 }
