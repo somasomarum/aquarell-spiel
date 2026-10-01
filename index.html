@@ -28,7 +28,7 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
 h1{font-family:var(--display);font-weight:700;font-size:1.9rem;margin:0;line-height:1;letter-spacing:.01em}
 h1 span{color:var(--blau);filter:brightness(1.4)}
 .ver{font:600 .72rem var(--body);color:var(--muted);opacity:.75;margin-left:8px;letter-spacing:.02em;cursor:help;font-variant-numeric:tabular-nums}
-.score{display:flex;align-items:baseline;gap:12px;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem}
+.score{display:flex;align-items:baseline;gap:12px;white-space:nowrap;cursor:pointer;font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9rem}
 .stars{font-size:1.3rem;letter-spacing:.1em;color:var(--chip-line)}
 .stars b{color:var(--accent);font-weight:400}
 .stage{position:relative;flex:1;min-height:0}
@@ -104,8 +104,8 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 <script>
 (() => {
 // ---------- Version ----------
-// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. f6181ce ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.13', VERSION_NOTE = 'Aufgeräumt: Einstellungen im ⚙-Menü, mehr Platz fürs Blatt', BUILD = 'f6181ce';
+// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. ad0e58c ersetzt tools/pages.sh durch den Commit.
+const VERSION = '0.14', VERSION_NOTE = 'Schraffur zeigt, wo noch Farbe fehlt (Punkte antippen: aufleuchten)', BUILD = 'ad0e58c';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -563,10 +563,33 @@ function render() {
   ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = .18; ctx.drawImage(midQ, -R * .6, -R * .6, cv.width, cv.height);   // Glanzkante oben links
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
+  drawHatch();
   ctx.drawImage(wallC, 0, 0);
   drawDabs();
   drawFunnels();
 }
+// Bleistift-Schraffur auf Zielflächen, wo noch Farbe fehlt (aus progress() aktualisiert). Antippen der Punkte lässt sie aufleuchten.
+const hatchMask = mk(W, H), hmx = hatchMask.getContext('2d'), hImg = hmx.createImageData(W, H), hatchC = mk(W * R, H * R), hcx = hatchC.getContext('2d');
+const hatchPat = (() => { const c = mk(12, 12), x = c.getContext('2d'); x.strokeStyle = '#4a4450'; x.lineWidth = 1.6; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(-2, 14); x.lineTo(14, -2); x.moveTo(-2, 2); x.lineTo(2, -2); x.moveTo(10, 14); x.lineTo(14, 10); x.stroke(); return hcx.createPattern(c, 'repeat'); })();
+let hatchFlash = 0;
+function updateHatch() {
+  const d = hImg.data; d.fill(0);
+  for (const t of TARGETS) {
+    const wrong = t.goal && t.color && t.color !== t.goal;
+    if (t.cov >= .8 && !wrong) continue;                  // zählt schon voll
+    for (const i of t.cells) { const b = i * 3; if (wrong || stain[b] + stain[b + 1] + stain[b + 2] <= 1.1) d[i * 4 + 3] = 255; }
+  }
+  hmx.putImageData(hImg, 0, 0);
+  hcx.globalCompositeOperation = 'source-over'; hcx.clearRect(0, 0, hatchC.width, hatchC.height);
+  hcx.imageSmoothingEnabled = true; hcx.drawImage(hatchMask, 0, 0, hatchC.width, hatchC.height);
+  hcx.globalCompositeOperation = 'source-in'; hcx.fillStyle = hatchPat; hcx.fillRect(0, 0, hatchC.width, hatchC.height);
+}
+function drawHatch() {
+  const now = performance.now(), f = hatchFlash > now ? .5 + .4 * Math.sin((hatchFlash - now) / 1800 * Math.PI * 4) ** 2 : 0;
+  ctx.globalAlpha = .28 + f; ctx.drawImage(hatchC, 0, 0); ctx.globalAlpha = 1;
+}
+
 // Farbklecks je Ziel-Form: Ring = Zielfarbe, innen = Farbe, die die Form gerade hat, Haken = geschafft.
 function drawDabs() {
   for (const s of GOALS) {
@@ -635,9 +658,11 @@ function progress() {
   const avg = sum / TARGETS.length, stars = avg >= .85 ? 3 : avg >= .6 ? 2 : avg >= .35 ? 1 : 0;
   const f = document.getElementById('filled'); f.textContent = `${done}/${TARGETS.length} Formen · ${colors}/${GOALS.length} Farben`; f.title = `Schnitt ${Math.round(avg * 100)} %`;
   document.getElementById('stars').innerHTML = '<b>' + '★'.repeat(stars) + '</b>' + '★'.repeat(3 - stars);
+  updateHatch();
   if (stars > lastStars) toast(['', 'Erster Stern!', 'Zweiter Stern!', 'Drei Sterne. Das Bild ist fertig.'][stars]);
   lastStars = stars;
 }
+document.querySelector('.score').addEventListener('click', () => { hatchFlash = performance.now() + 1800; toast('Schraffiert = fehlt noch'); });
 let toastT;
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.opacity = 1;
   clearTimeout(toastT); toastT = setTimeout(() => t.style.opacity = 0, 2200); }
