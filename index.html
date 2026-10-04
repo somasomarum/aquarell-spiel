@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#3b2a20">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
 <title>Aquarell</title>
@@ -136,7 +140,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 (() => {
 // ---------- Version ----------
 // Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
-const VERSION = '2.1', VERSION_NOTE = 'Code in Quelldateien aufgeteilt, schneller: 3 statt 5 Ebenen, Farbe seltener neu', BUILD = '6bd789c';
+const VERSION = '2.2', VERSION_NOTE = 'Offline spielbar, als App auf den Startbildschirm legbar', BUILD = 'd8308a0';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -1231,5 +1235,6 @@ function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3
 window.__aquarell = { step, advance, water, stain, setLevel, get TARGETS() { return TARGETS; }, get GOALS() { return GOALS; }, setFluid: v => { fluid = v; }, setVisc, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
 })();
 </script>
+<script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));</script>
 </body>
 </html>
