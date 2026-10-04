@@ -133,7 +133,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 (() => {
 // ---------- Version ----------
 // Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.18', VERSION_NOTE = 'Wasser beschleunigt im freien Fall (kein Schlauch-Effekt mehr beim Kippen)', BUILD = '6200465';
+const VERSION = '0.19', VERSION_NOTE = 'Wasser klarer: fallend hell und durchscheinend, Aufprall läuft zur Seite weg', BUILD = 'a7890c1';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -453,7 +453,7 @@ function upd(x, y) {
     }
     mom[j] = s; return;
   }
-  vel[i] = 0;                                              // aufgeschlagen: Schwung weg
+  const impact = vel[i]; vel[i] = impact > .3 ? impact * .5 : 0;   // aufgeschlagen: halber Schwung bleibt und treibt zur Seite
   // schräg (nicht durch Wandecken)
   for (const dir of [s, -s]) {
     const [dx, dy] = DIRS[(p + dir) & 7];
@@ -461,10 +461,11 @@ function upd(x, y) {
   }
   // seitlich verlaufen (bei zähem Wasser seltener und kürzer): zuerst dorthin, wo es tiefer geht,
   // sonst mit Schwung in eine Richtung weiter, bis es anstößt – dann liegt es ruhig (kein Hin-und-her-Wuseln auf Pfützen).
-  if (Math.random() > V.side) return;
+  if (impact < 1 && Math.random() > V.side) return;
+  const reach = V.spread + (impact > 1 ? Math.round(impact) : 0);   // mit Aufprall-Schwung weiter
   for (const dir of [s, -s]) {
     const [px, py] = DIRS[(p + 2 * dir) & 7];
-    for (let k = 1; k <= V.spread; k++) {
+    for (let k = 1; k <= reach; k++) {
       const sx = x + px * k, sy = y + py * k;
       if (!inside(sx, sy)) { water[i] = 0; return; }
       const q = sy * W + sx; if (wall[q] || water[q]) break;
@@ -505,7 +506,7 @@ function emit() {
     const px = -f.n[1], py = f.n[0];
     for (let k = -2; k <= 2; k++) {
       const x = f.x + px * k + f.n[0], y = f.y + py * k + f.n[1];
-      if (!inside(x, y) || Math.random() > (Math.abs(k) === 2 ? .35 : .8)) continue;
+      if (!inside(x, y) || Math.random() > (Math.abs(k) === 2 ? .12 : Math.abs(k) === 1 ? .7 : .95)) continue;   // schmaler Strahl
       const i = y * W + x; if (wall[i] || water[i]) continue;
       water[i] = 1; moved[i] = tick; drift[i] = Math.random(); mom[i] = 0; vel[i] = 0; pa[i * 3] = f.pig[0]; pa[i * 3 + 1] = f.pig[1]; pa[i * 3 + 2] = f.pig[2];
       if (!zen) f.left--;
@@ -653,7 +654,8 @@ function render() {
     const dn = qWb[i], nz = wnoise[i], th = .12 + .24 * nz;
     if (dn > th) {
       const a = Math.min(1, (dn - th) / .32), edge = 4 * a * (1 - a);
-      const k = .3 / dn * gran[i] * (.75 + .5 * nz) * (1 + 2.2 * edge * edge);   // heller, ungleichmäßig, kräftiger Pigmentrand
+      const flow = water[i] ? vel[i] > .6 : trail[i] > 0;    // fallendes/strömendes Wasser: hell und klar, ohne Körnung und Rand
+      const k = flow ? .16 / dn : .3 / dn * gran[i] * (.75 + .5 * nz) * (1 + 2.2 * edge * edge);   // stehend: Lasur mit Pigmentrand
       qd[o] = 255 * Math.exp(-qPb[0][i] * k); qd[o + 1] = 255 * Math.exp(-qPb[1][i] * k); qd[o + 2] = 255 * Math.exp(-qPb[2][i] * k);
       qd[o + 3] = 255 * Math.min(1, a * 1.6);
     } else qd[o + 3] = 0;
