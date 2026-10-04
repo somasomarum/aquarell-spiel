@@ -72,7 +72,6 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 .keys{color:var(--muted);font-size:.75rem;opacity:.8;margin:8px 0 0;line-height:1.4}
 #paper canvas{position:absolute;inset:0;width:100%;height:100%}
 #lDyn{mix-blend-mode:multiply}   /* Farbe und Wasser lasieren aufs Papier */
-#lHatch{opacity:.28}
 #fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
 #bigstars{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%) scale(.2);font-size:min(22vw,9rem);color:var(--accent);
   text-shadow:0 6px 24px rgba(0,0,0,.5),0 0 2px #7a5a10;opacity:0;pointer-events:none;z-index:3;letter-spacing:.05em;white-space:nowrap}
@@ -108,7 +107,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
     <h1>Aqua<span>rell</span><small class="ver" id="ver"></small></h1>
     <div class="score"><span id="filled">0 / 0 Formen gefüllt</span><span class="stars" id="stars" aria-label="Sterne">★★★</span></div>
   </header>
-  <div class="stage" id="stage"><div id="paper"><canvas id="lPaper"></canvas><canvas id="lDyn"></canvas><canvas id="lHatch"></canvas><canvas id="lWall"></canvas><canvas id="lTop"></canvas></div><canvas id="fx"></canvas><div id="bigstars" aria-hidden="true">★★★</div><div id="toast"></div></div>
+  <div class="stage" id="stage"><div id="paper"><canvas id="lPaper"></canvas><canvas id="lDyn"></canvas><canvas id="lTop"></canvas></div><canvas id="fx"></canvas><div id="bigstars" aria-hidden="true">★★★</div><div id="toast"></div></div>
   <div class="tools">
     <button id="toolTurn" aria-pressed="true" title="Drehen: Blatt mit dem Finger oder der Maus kippen (D)">Drehen</button>
     <button id="toolPen" aria-pressed="false" title="Stift: eigene Linien (begrenzte Tinte)">Stift <span class="meter"><i id="inkBar"></i></span></button>
@@ -137,7 +136,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 (() => {
 // ---------- Version ----------
 // Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
-const VERSION = '2.0', VERSION_NOTE = 'Version 2: Blatt aus Ebenen, pro Bild wird nur noch Farbe und Wasser neu gemalt', BUILD = '98595d7';
+const VERSION = '2.1', VERSION_NOTE = 'Code in Quelldateien aufgeteilt, schneller: 3 statt 5 Ebenen, Farbe seltener neu', BUILD = '6bd789c';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -316,12 +315,11 @@ function setGravity() {
 }
 
 // ---------- Canvas ----------
-// Das Blatt besteht aus übereinanderliegenden Ebenen; pro Bild wird nur die kleine Farb-/Wasser-Ebene neu gemalt,
-// der Browser legt sie per multiply aufs Papier. Papier und Linien ändern sich selten, Schraffur und Kleckse ab und zu.
+// Das Blatt besteht aus drei Ebenen: Papier (fest), Farbe+Wasser (klein, jedes Bild, per multiply aufs Papier) und
+// oben Schraffur+Linien+Kleckse+Trichter (nur neu, wenn sich dort etwas ändert, sonst alle 6 Bilder für die Trichter).
 const cv = document.getElementById('paper');   // Container: Drehen, Zeigereingaben
-const lPaper = document.getElementById('lPaper'), lDyn = document.getElementById('lDyn'), lHatch = document.getElementById('lHatch'),
-  lWall = document.getElementById('lWall'), lTop = document.getElementById('lTop');
-const ctx = lTop.getContext('2d'), dctx = lDyn.getContext('2d');   // ctx: Kleckse und Trichter
+const lPaper = document.getElementById('lPaper'), lDyn = document.getElementById('lDyn'), lTop = document.getElementById('lTop');
+const ctx = lTop.getContext('2d'), dctx = lDyn.getContext('2d');   // ctx: obere Ebene
 
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 const stainC = mk(W, H), waterC = mk(W, H), sctx = stainC.getContext('2d'), qctx = waterC.getContext('2d');
@@ -340,12 +338,13 @@ function makePaper() {
 }
 // Alle Ebenen in voller Auflösung neu anlegen (beim Start und wenn die Grafikqualität wechselt).
 function initCanvases() {
-  for (const c of [lPaper, lWall, lHatch, lTop]) { c.width = W * R; c.height = H * R; }
-  paperC = lPaper; wallC = lWall; wctx = wallC.getContext('2d');
+  for (const c of [lPaper, lTop]) { c.width = W * R; c.height = H * R; }
+  paperC = lPaper; wallC = mk(W * R, H * R); wctx = wallC.getContext('2d');
   makePaper(); initHatch();
 }
 
 function crayonPath(pts, color, width) {
+  topDirty = true;
   wctx.save(); wctx.lineCap = 'round'; wctx.lineJoin = 'round'; wctx.strokeStyle = color;
   for (let pass = 0; pass < 3; pass++) {
     wctx.globalAlpha = pass === 0 ? .9 : .45; wctx.lineWidth = width * R * (1 - pass * .18);
@@ -374,6 +373,7 @@ function stamp(cx, cy, rad, val) {
   }
 }
 function eraseAt(x, y, r) {
+  topDirty = true;
   stamp(x, y, r, 0);
   wctx.save(); wctx.globalCompositeOperation = 'destination-out';
   const gr = wctx.createRadialGradient((x + .5) * R, (y + .5) * R, 0, (x + .5) * R, (y + .5) * R, r * R * 1.1);
@@ -636,7 +636,7 @@ const FILTER = typeof dctx.filter === 'string';
 { const r = new Float32Array(N); for (let i = 0; i < N; i++) r[i] = Math.random(); boxBlur(r, wnoise, 2);
   let lo = 1, hi = 0; for (const v of wnoise) { lo = Math.min(lo, v); hi = Math.max(hi, v); } for (let i = 0; i < N; i++) wnoise[i] = (wnoise[i] - lo) / (hi - lo); }
 // Weichzeichnen auf kleinen Zwischen-Canvases (2 px pro Zelle), dann weich hochskalieren: billig auch auf dem Handy.
-const M = 2, midQ = mk(W * M, H * M), mQ = midQ.getContext('2d');
+const M = 2, midQ = mk(W * M, H * M), mQ = midQ.getContext('2d'), midS = mk(W * M, H * M), mS = midS.getContext('2d');
 lDyn.width = W * M; lDyn.height = H * M;
 function soft(dst, src, px) {
   dst.clearRect(0, 0, W * M, H * M); dst.imageSmoothingEnabled = true;
@@ -647,47 +647,72 @@ function soft(dst, src, px) {
   }
   if (FILTER && R > 3) dst.filter = 'none';
 }
+// exp(-x) als Nachschlagetabelle (256 Stufen pro Einheit bis x = 16) – spart ~6 Math.exp pro Zelle und Bild
+const EXPT = new Float32Array(4097); for (let k = 0; k <= 4096; k++) EXPT[k] = Math.exp(-k / 256);
+const ex = x => x >= 16 ? 0 : EXPT[(x * 256) | 0];
+let stainDirty = true;
 function render() {
-  const sd = sImg.data, qd = qImg.data;
-  for (let i = 0, b = 0; i < N; i++, b += 3) sumBuf[i] = stain[b] + stain[b + 1] + stain[b + 2];
-  boxBlur(sumBuf, blurBuf, 2);
+  // Farbe im Papier ändert sich langsam: nur jedes 3. Bild (oder auf Anforderung) neu berechnen und weichzeichnen
+  if (stainDirty || frame % 3 === 0) { stainDirty = false; renderStain(); }
+  const qd = qImg.data;
   // Wasser als zusammenhängende Fläche: Dichte weichzeichnen und mit einer Schwelle schneiden (wie Metaballs),
   // einzelne Zellen verschwinden, benachbarte verschmelzen. Farbe = gemittelte Pigmente der Nachbarn.
   for (let i = 0, b = 0; i < N; i++, b += 3) {
     const w = water[i], t = w ? 0 : trail[i]; qW[i] = w + t;
     qP[0][i] = w * pa[b] + t * trailP[b]; qP[1][i] = w * pa[b + 1] + t * trailP[b + 1]; qP[2][i] = w * pa[b + 2] + t * trailP[b + 2];
-    if (trail[i]) trail[i] = trail[i] < .05 ? 0 : trail[i] * .62;
+    if (t) trail[i] = t < .05 ? 0 : t * .62;
   }
   boxBlur(qW, qWb, 1); for (let c = 0; c < 3; c++) boxBlur(qP[c], qPb[c], 1);
-  for (let i = 0, b = 0, o = 0; i < N; i++, b += 3, o += 4) {
-    const s = sumBuf[i], edge = s > .02 ? Math.max(0, s - blurBuf[i]) / (s + .15) : 0;
-    const f = .6 * gran[i] * (1 + 1.1 * edge), w = 1 - .08 * wet[i];
-    sd[o] = 255 * Math.exp(-stain[b] * f) * w; sd[o + 1] = 255 * Math.exp(-stain[b + 1] * f) * w; sd[o + 2] = 255 * Math.exp(-stain[b + 2] * f) * (1 - .05 * wet[i]); sd[o + 3] = 255;
+  for (let i = 0, o = 3; i < N; i++, o += 4) {
     // Wasser als nasse Farblasur: unregelmäßiger Rand (Rauschen in der Schwelle), Pigment sammelt sich dunkel am Rand,
     // innen körnig wie das Papier. Wird per Multiplizieren aufs Papier gelegt, nicht deckend.
-    const dn = qWb[i], nz = wnoise[i], th = .12 + .24 * nz;
+    const dn = qWb[i];
+    if (dn <= .12) { qd[o] = 0; continue; }                 // schneller Ausstieg: hier ist kein Wasser
+    const nz = wnoise[i], th = .12 + .24 * nz;
     if (dn > th) {
       const a = Math.min(1, (dn - th) / .32), edge = 4 * a * (1 - a);
       const flow = water[i] ? vel[i] > .6 : trail[i] > 0;    // fallendes/strömendes Wasser: hell und klar, ohne Körnung und Rand
       const k = flow ? .16 / dn : .3 / dn * gran[i] * (.75 + .5 * nz) * (1 + 2.2 * edge * edge);   // stehend: Lasur mit Pigmentrand
-      qd[o] = 255 * Math.exp(-qPb[0][i] * k); qd[o + 1] = 255 * Math.exp(-qPb[1][i] * k); qd[o + 2] = 255 * Math.exp(-qPb[2][i] * k);
-      qd[o + 3] = 255 * Math.min(1, a * 1.6);
-    } else qd[o + 3] = 0;
+      qd[o - 3] = 255 * ex(qPb[0][i] * k); qd[o - 2] = 255 * ex(qPb[1][i] * k); qd[o - 1] = 255 * ex(qPb[2][i] * k);
+      qd[o] = 255 * Math.min(1, a * 1.6);
+    } else qd[o] = 0;
   }
-  sctx.putImageData(sImg, 0, 0); qctx.putImageData(qImg, 0, 0);
-  soft(dctx, stainC, 1.4); soft(mQ, waterC, .8);   // Farbe direkt in die Ebene, Wasser darüber lasieren
+  qctx.putImageData(qImg, 0, 0);
+  mQ.clearRect(0, 0, W * M, H * M); mQ.imageSmoothingEnabled = true; mQ.drawImage(waterC, 0, 0, W * M, H * M);   // ohne Filter: Dichte ist schon geglättet
+  dctx.drawImage(midS, 0, 0);                                // Farbe (zwischengespeichert), Wasser darüber lasieren
   dctx.globalCompositeOperation = 'multiply'; dctx.globalAlpha = .95; dctx.drawImage(midQ, 0, 0);
   dctx.globalCompositeOperation = 'source-over'; dctx.globalAlpha = 1;
   drawHatch();
-  if (frame % 6 === 0 || topDirty) drawTop();
+  if (frame % 6 === 0) {   // Trichter: nur neu malen, wenn sich sichtbar etwas ändert (gießt / Füllstand in 5-%-Schritten)
+    let sig = ''; for (const f of FUNNELS) sig += (pours(f) ? 1 : 0) + ':' + (zen ? 20 : Math.round(f.left / f.max * 20)) + ',';
+    if (sig !== funnelSig) { funnelSig = sig; topDirty = true; }
+  }
+  if (topDirty) drawTop();
+}
+let funnelSig = '';
+function renderStain() {
+  const sd = sImg.data;
+  for (let i = 0, b = 0; i < N; i++, b += 3) sumBuf[i] = stain[b] + stain[b + 1] + stain[b + 2];
+  boxBlur(sumBuf, blurBuf, 2);
+  for (let i = 0, b = 0, o = 0; i < N; i++, b += 3, o += 4) {
+    const s = sumBuf[i], edge = s > .02 ? Math.max(0, s - blurBuf[i]) / (s + .15) : 0;
+    const f = .6 * gran[i] * (1 + 1.1 * edge), w = 1 - .08 * wet[i];
+    sd[o] = 255 * ex(stain[b] * f) * w; sd[o + 1] = 255 * ex(stain[b + 1] * f) * w; sd[o + 2] = 255 * ex(stain[b + 2] * f) * (1 - .05 * wet[i]); sd[o + 3] = 255;
+  }
+  sctx.putImageData(sImg, 0, 0);
+  soft(mS, stainC, 1.4);
 }
 let topDirty = true;
-function drawTop() { topDirty = false; ctx.clearRect(0, 0, lTop.width, lTop.height); drawDabs(); drawFunnels(); }
+function drawTop() {
+  topDirty = false; ctx.clearRect(0, 0, lTop.width, lTop.height);
+  ctx.globalAlpha = hatchOp; ctx.drawImage(hatchC, 0, 0); ctx.globalAlpha = 1;
+  ctx.drawImage(wallC, 0, 0); drawDabs(); drawFunnels();
+}
 // Bleistift-Schraffur auf Zielflächen, wo noch Farbe fehlt (aus progress() aktualisiert). Antippen der Punkte lässt sie aufleuchten.
 const hatchMask = mk(W, H), hmx = hatchMask.getContext('2d'), hImg = hmx.createImageData(W, H);
 let hatchC, hcx, hatchPat;
 function initHatch() {
-  hatchC = lHatch; hcx = hatchC.getContext('2d');
+  hatchC = mk(W * R, H * R); hcx = hatchC.getContext('2d');
   const c = mk(12, 12), x = c.getContext('2d'); x.strokeStyle = '#4a4450'; x.lineWidth = 1.6; x.lineCap = 'round';
   x.beginPath(); x.moveTo(-2, 14); x.lineTo(14, -2); x.moveTo(-2, 2); x.lineTo(2, -2); x.moveTo(10, 14); x.lineTo(14, 10); x.stroke();
   hatchPat = hcx.createPattern(c, 'repeat');
@@ -704,11 +729,12 @@ function updateHatch() {
   hcx.globalCompositeOperation = 'source-over'; hcx.clearRect(0, 0, hatchC.width, hatchC.height);
   hcx.imageSmoothingEnabled = true; hcx.drawImage(hatchMask, 0, 0, hatchC.width, hatchC.height);
   hcx.globalCompositeOperation = 'source-in'; hcx.fillStyle = hatchPat; hcx.fillRect(0, 0, hatchC.width, hatchC.height);
+  topDirty = true;
 }
 let hatchOp = .28;
-function drawHatch() {   // nur noch die Deckkraft der Ebene, gezeichnet wird in updateHatch()
+function drawHatch() {   // Deckkraft der Schraffur; beim Aufleuchten wird die obere Ebene jedes Bild neu gemalt
   const now = performance.now(), f = hatchFlash > now ? .5 + .4 * Math.sin((hatchFlash - now) / 1800 * Math.PI * 4) ** 2 : 0, op = .28 + f;
-  if (Math.abs(op - hatchOp) > .005) { hatchOp = op; lHatch.style.opacity = op; }
+  if (Math.abs(op - hatchOp) > .005) { hatchOp = op; topDirty = true; }
 }
 
 // Farbklecks je Ziel-Form: Ring = Zielfarbe, innen = Farbe, die die Form gerade hat, Haken = geschafft.
@@ -924,7 +950,7 @@ function updTools() {
   document.getElementById('eraseCount').textContent = zen ? '∞' : erasers;
 }
 function restart() {
-  topDirty = true;
+  topDirty = true; stainDirty = true;
   for (const t of TARGETS) t.cheered = false; drops = [];
   water.fill(0); drift.fill(0); mom.fill(0); vel.fill(0); trail.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
   for (const f of FUNNELS) f.left = f.max;
@@ -1190,6 +1216,7 @@ function watchSpeed(t) {   // im Auto-Modus: nach dem Start ~2 s messen, bei unt
   fpsT = t;
   if (fpsN === 120) { if (fpsSum / fpsN > 33) { lowAuto = true; applyQuality(); toast('Grafik auf schnell gestellt'); } fpsN = 999; }
 }
+// ---------- Start ----------
 { let k = 1; try { const v = localStorage.getItem('aquarell-level'); if (v !== null) k = +v; } catch (e) {} setLevel(k, true); showZen(); }   // erster Besuch: Level 2 (am leichtesten)
 // Startbildschirm: ein großer Knopf, der am Tablet gleich das Neigen einschaltet (iOS braucht dafür einen Fingertipp)
 let started = false;
@@ -1200,7 +1227,7 @@ document.getElementById('go').onclick = () => { document.getElementById('start')
 document.getElementById('go').focus();
 layout(); requestAnimationFrame(loop);
 // Test-Hilfe: n Frames ohne Warten vorspulen
-function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3 === 0) bleed(); } render(); progress(); }
+function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3 === 0) bleed(); } stainDirty = true; render(); progress(); }
 window.__aquarell = { step, advance, water, stain, setLevel, get TARGETS() { return TARGETS; }, get GOALS() { return GOALS; }, setFluid: v => { fluid = v; }, setVisc, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
 })();
 </script>
