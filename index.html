@@ -70,17 +70,42 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 .visc input{width:min(170px,40vw);accent-color:var(--accent)}
 .levels{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .keys{color:var(--muted);font-size:.75rem;opacity:.8;margin:8px 0 0;line-height:1.4}
+#fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+#bigstars{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%) scale(.2);font-size:min(22vw,9rem);color:var(--accent);
+  text-shadow:0 6px 24px rgba(0,0,0,.5),0 0 2px #7a5a10;opacity:0;pointer-events:none;z-index:3;letter-spacing:.05em;white-space:nowrap}
+#bigstars.on{animation:stars 2.6s ease-out forwards}
+@keyframes stars{0%{opacity:0;transform:translate(-50%,-50%) scale(.2) rotate(-12deg)}18%{opacity:1;transform:translate(-50%,-50%) scale(1.15) rotate(4deg)}
+  30%{transform:translate(-50%,-50%) scale(1)}80%{opacity:1}100%{opacity:0;transform:translate(-50%,-60%) scale(1.05)}}
+.start{position:fixed;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;background:rgba(30,20,14,.72);padding:16px}
+.start[hidden]{display:none}
+.start-card{background:var(--paper);color:#2a2026;border-radius:18px;padding:28px 28px 22px;text-align:center;box-shadow:0 18px 40px rgba(0,0,0,.5);width:min(420px,100%);box-sizing:border-box}
+.start-title{font-family:var(--display);font-weight:700;font-size:3rem;line-height:1}
+.start-title span{color:var(--blau)}
+.start-level{font-family:var(--display);font-size:1.2rem;color:#6f6874;margin:6px 0 18px}
+.go{font:700 2rem var(--display);color:#fff;background:var(--blau);border:0;border-radius:999px;padding:14px 44px;cursor:pointer;
+  box-shadow:0 6px 0 #173f87,0 10px 20px rgba(0,0,0,.25);min-height:72px}
+.go:active{transform:translateY(4px);box-shadow:0 2px 0 #173f87}
+.go:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
+.start-hint{font-family:var(--display);font-size:1.15rem;color:#5a5260;margin:18px 0 0}
 #toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--paper);color:#2a2026;
   font-family:var(--display);font-size:1.2rem;padding:6px 16px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.4);
   transition:opacity .4s;opacity:0;pointer-events:none;z-index:3}
 </style>
 
+<div class="start" id="start">
+  <div class="start-card">
+    <div class="start-title">Aqua<span>rell</span></div>
+    <div class="start-level" id="startLevel"></div>
+    <button id="go" class="go">▶ Los!</button>
+    <p class="start-hint" id="startHint">Zieh am Blatt, dann läuft das Wasser.</p>
+  </div>
+</div>
 <div class="app">
   <header>
     <h1>Aqua<span>rell</span><small class="ver" id="ver"></small></h1>
     <div class="score"><span id="filled">0 / 0 Formen gefüllt</span><span class="stars" id="stars" aria-label="Sterne">★★★</span></div>
   </header>
-  <div class="stage" id="stage"><canvas id="paper"></canvas><div id="toast"></div></div>
+  <div class="stage" id="stage"><canvas id="paper"></canvas><canvas id="fx"></canvas><div id="bigstars" aria-hidden="true">★★★</div><div id="toast"></div></div>
   <div class="tools">
     <button id="toolTurn" aria-pressed="true" title="Drehen: Blatt mit dem Finger oder der Maus kippen (D)">Drehen</button>
     <button id="toolPen" aria-pressed="false" title="Stift: eigene Linien (begrenzte Tinte)">Stift <span class="meter"><i id="inkBar"></i></span></button>
@@ -96,7 +121,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
       <div class="row"><span>Zähigkeit</span><div class="visc"><small>Wasser</small><input type="range" id="visc" min="0" max="4" step="0.05" value="2.1" aria-label="Zähigkeit: Wasser bis Honig"><small>Honig</small></div></div>
       <div class="row"><span>Wasser</span><button id="fluidBtn" aria-pressed="true" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: flüssig</button></div>
       <div class="row" id="tiltRow" hidden><span>Handy neigen</span><button id="tiltBtn" aria-pressed="false" title="iPhone/Handy neigen statt ziehen">Neigen</button></div>
-      <div class="row"><span>Alles unbegrenzt</span><button id="zen" aria-pressed="false" title="Unbegrenzt Wasser, Tinte und Radierer">Zen</button></div>
+      <div class="row"><span>Unbegrenzt Wasser, Tinte, Radierer</span><button id="zen" aria-pressed="false" title="Kindermodus: unbegrenzt Wasser, Tinte und Radierer">Kindermodus</button></div>
       <div class="row"><span>Blatt neu beginnen</span><button id="restart" title="Blatt neu beginnen">Neu</button></div>
       <p class="keys">Ziehen oder Mausrad dreht das Blatt. Tasten: Q/E drehen · D Drehen · P Stift · R Radierer · Z zurück · W Wasser</p>
     </div>
@@ -106,8 +131,8 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 <script>
 (() => {
 // ---------- Version ----------
-// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. 6b7a219 ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.15', VERSION_NOTE = 'Zwei neue Level: Drei Schalen, Luftlöcher (Level-Wahl im ⚙-Menü)', BUILD = '6b7a219';
+// Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
+const VERSION = '0.16', VERSION_NOTE = 'Für Kinder: Startknopf, Kindermodus, Jubel bei fertigen Formen', BUILD = 'ef206f0';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -690,15 +715,64 @@ function progress() {
       ok = s.color === s.goal; s.ok = ok && s.cov >= .6; if (s.ok) colors++;
     }
     if (ok) { sum += Math.min(1, s.cov / .8); if (s.cov >= .6) done++; }   // falsche Farbe zählt nicht
+    const isDone = ok && s.cov >= .6;
+    if (isDone && !s.cheered) { s.cheered = true; cheerShape(s); }
   }
   const avg = sum / TARGETS.length, stars = avg >= .85 ? 3 : avg >= .6 ? 2 : avg >= .35 ? 1 : 0;
   const f = document.getElementById('filled'); f.textContent = `L${levelNo + 1} · ${done}/${TARGETS.length} Formen` + (GOALS.length ? ` · ${colors}/${GOALS.length} Farben` : ''); f.title = `Schnitt ${Math.round(avg * 100)} %`;
   document.getElementById('stars').innerHTML = '<b>' + '★'.repeat(stars) + '</b>' + '★'.repeat(3 - stars);
   updateHatch();
+  if (stars > lastStars) celebrate(stars);
   if (stars > lastStars) toast(['', 'Erster Stern!', 'Zweiter Stern!', levelNo < LEVELS.length - 1 ? 'Drei Sterne! Nächstes Level im ⚙-Menü' : 'Drei Sterne. Das Bild ist fertig.'][stars]);
   lastStars = stars;
 }
 document.querySelector('.score').addEventListener('click', () => { hatchFlash = performance.now() + 1800; toast('Schraffiert = fehlt noch'); });
+// ---------- Jubel ----------
+// Farbtropfen auf einer eigenen Ebene über dem Blatt (Bildschirmkoordinaten, fallen immer nach unten).
+const fx = document.getElementById('fx'), fxc = fx.getContext('2d');
+let drops = [];
+function gridToStage(x, y) {   // Rasterzelle → Punkt in der Bühne (Umkehrung von toGrid)
+  const dx = ((x + .5) / W - .5) * baseW * scale, dy = ((y + .5) / H - .5) * baseH * scale, t = ang * Math.PI / 180;
+  return [stage.clientWidth / 2 + dx * Math.cos(t) - dy * Math.sin(t), stage.clientHeight / 2 + dx * Math.sin(t) + dy * Math.cos(t)];
+}
+const SPLASH = ['#2660c4', '#d4303e', '#f2c420', '#6a3d9a', '#3d8f3a', '#e8792b'];
+function burst(x, y, n, cols, power) {
+  for (let k = 0; k < n; k++) { const a = Math.random() * Math.PI * 2, v = (.4 + Math.random()) * power;
+    drops.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - power * .6, r: 3 + Math.random() * 6, col: cols[k % cols.length], life: 1 }); }
+}
+function shapeColor(s) {
+  if (s.goal) return mixCss(MIX[s.goal]);
+  const a = [0, 0, 0]; for (const i of s.cells) for (let k = 0; k < 3; k++) a[k] += stain[i * 3 + k];
+  const n = s.cells.length || 1; return `rgb(${a.map(v => Math.round(247 * Math.exp(-v / n * .7))).join(',')})`;
+}
+function cheerShape(s) {
+  if (!s.cells.length) return;
+  let x = 0, y = 0; for (const i of s.cells) { x += i % W; y += (i / W) | 0; }
+  const [sx, sy] = gridToStage(x / s.cells.length, y / s.cells.length);
+  burst(sx, sy, 26, [shapeColor(s), '#f7f4ee', shapeColor(s)], 5);
+}
+function celebrate(stars) {
+  const w = stage.clientWidth;
+  if (stars >= 3) {
+    for (let k = 0; k < 140; k++) drops.push({ x: Math.random() * w, y: -20 - Math.random() * 300, vx: (Math.random() - .5) * 2, vy: 2 + Math.random() * 3,
+      r: 4 + Math.random() * 9, col: SPLASH[k % SPLASH.length], life: 1.6 });
+    const b = document.getElementById('bigstars'); b.classList.remove('on'); void b.offsetWidth; b.classList.add('on');
+  } else burst(w / 2, stage.clientHeight * .25, 40 * stars, SPLASH, 6);
+}
+function drawFx() {
+  const dpr = Math.min(2, devicePixelRatio || 1), w = stage.clientWidth, h = stage.clientHeight;
+  if (fx.width !== Math.round(w * dpr) || fx.height !== Math.round(h * dpr)) { fx.width = Math.round(w * dpr); fx.height = Math.round(h * dpr); }
+  fxc.setTransform(dpr, 0, 0, dpr, 0, 0); fxc.clearRect(0, 0, w, h);
+  if (!drops.length) return;
+  for (const d of drops) {
+    d.vy += .22; d.vx *= .99; d.x += d.vx; d.y += d.vy; d.life -= .008;
+    fxc.globalAlpha = Math.max(0, Math.min(1, d.life)) * .9; fxc.fillStyle = d.col;
+    fxc.beginPath(); fxc.ellipse(d.x, d.y, d.r, d.r * (1 + Math.min(.6, Math.abs(d.vy) * .05)), Math.atan2(d.vy, d.vx) + Math.PI / 2, 0, 7); fxc.fill();
+  }
+  fxc.globalAlpha = 1;
+  drops = drops.filter(d => d.life > 0 && d.y < h + 40);
+}
+
 let toastT;
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.opacity = 1;
   clearTimeout(toastT); toastT = setTimeout(() => t.style.opacity = 0, 2200); }
@@ -791,6 +865,7 @@ function updTools() {
   document.getElementById('eraseCount').textContent = zen ? '∞' : erasers;
 }
 function restart() {
+  for (const t of TARGETS) t.cheered = false; drops = [];
   water.fill(0); drift.fill(0); mom.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
   for (const f of FUNNELS) f.left = f.max;
   rebuildWalls(); updTools(); progress();
@@ -860,9 +935,11 @@ function closeMenu() { if (menu.hidden) return; menu.hidden = true; menuBtn.setA
 menuBtn.onclick = () => menu.hidden ? openMenu() : closeMenu();
 document.getElementById('menuClose').onclick = closeMenu; document.getElementById('menuBack').onclick = closeMenu;
 addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
-// Beim ersten Start einmal kurz erklären (statt fester Hinweiszeile)
-try { if (!localStorage.getItem('aquarell-seen')) { setTimeout(() => toast('Zieh am Blatt, um es zu kippen'), 400); localStorage.setItem('aquarell-seen', '1'); } } catch (e) {}
-document.getElementById('zen').onclick = e => { zen = !zen; e.currentTarget.setAttribute('aria-pressed', zen); updTools(); toast(zen ? 'Zen: alles unbegrenzt' : 'Zen aus'); };
+
+function showZen() { document.getElementById('zen').setAttribute('aria-pressed', zen); updTools(); }
+document.getElementById('zen').onclick = () => { zen = !zen; showZen(); try { localStorage.setItem('aquarell-zen', zen ? '1' : '0'); } catch (e) {}
+  toast(zen ? 'Kindermodus: alles unbegrenzt' : 'Kindermodus aus'); };
+try { zen = localStorage.getItem('aquarell-zen') === '1'; } catch (e) {}
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;   // Pfeiltasten am Schieber nicht als Drehen werten
   const k = e.key.toLowerCase();
@@ -879,13 +956,20 @@ addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (['q', 'e', '
 // ---------- Loop ----------
 let frame = 0;
 function loop() {
-  simFrame();
+  if (started) simFrame();
   dry(); if (frame % 3 === 0) bleed();
-  render();
+  render(); drawFx();
   if (++frame % 20 === 0) progress();
   requestAnimationFrame(loop);
 }
-{ let k = 0; try { k = +(localStorage.getItem('aquarell-level') || 0); } catch (e) {} setLevel(k, true); }
+{ let k = 1; try { const v = localStorage.getItem('aquarell-level'); if (v !== null) k = +v; } catch (e) {} setLevel(k, true); showZen(); }   // erster Besuch: Level 2 (am leichtesten)
+// Startbildschirm: ein großer Knopf, der am Tablet gleich das Neigen einschaltet (iOS braucht dafür einen Fingertipp)
+let started = false;
+const canTilt = 'DeviceOrientationEvent' in window && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+document.getElementById('startLevel').textContent = `Level ${levelNo + 1}: ${LEVELS[levelNo].name}`;
+document.getElementById('startHint').textContent = canTilt ? 'Kipp das Tablet – das Wasser läuft immer nach unten.' : 'Zieh am Blatt, um es zu kippen.';
+document.getElementById('go').onclick = () => { document.getElementById('start').hidden = true; started = true; if (canTilt && !tiltOn) toggleTilt(); };
+document.getElementById('go').focus();
 layout(); requestAnimationFrame(loop);
 // Test-Hilfe: n Frames ohne Warten vorspulen
 function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3 === 0) bleed(); } render(); progress(); }
