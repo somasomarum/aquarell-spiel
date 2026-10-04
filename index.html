@@ -133,7 +133,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 (() => {
 // ---------- Version ----------
 // Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.17', VERSION_NOTE = 'Wasser als Aquarell-Lasur, Grafik Auto/Fein/Schnell', BUILD = '3939f16';
+const VERSION = '0.18', VERSION_NOTE = 'Wasser beschleunigt im freien Fall (kein Schlauch-Effekt mehr beim Kippen)', BUILD = '6200465';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -150,7 +150,9 @@ const sumBuf = new Float32Array(N), blurBuf = new Float32Array(N), tmpBuf = new 
 const wnoise = new Float32Array(N);                  // ruhiges Rauschen für unregelmäßige Wasserränder (einmal berechnet)
 const moved = new Uint32Array(N);
 const mom = new Int8Array(N);                        // Schwung beim seitlichen Rutschen: −1/+1, 0 = liegt ruhig
-const drift = new Float32Array(N);                   // je Wassertropfen: aufgelaufener Schräganteil (wie Bresenham), damit schräge Strahlen zusammenbleiben
+const drift = new Float32Array(N);
+const vel = new Float32Array(N);                     // Fallgeschwindigkeit je Tropfen (Zellen pro Schritt), nur im freien Fall > 0
+const trail = new Float32Array(N), trailP = new Float32Array(N * 3);   // kurze Spur hinter schnellen Tropfen (nur fürs Zeichnen)                   // je Wassertropfen: aufgelaufener Schräganteil (wie Bresenham), damit schräge Strahlen zusammenbleiben
 const qW = new Float32Array(N), qWb = new Float32Array(N), qP = [0, 1, 2].map(() => new Float32Array(N)), qPb = [0, 1, 2].map(() => new Float32Array(N));
 let tick = 1;
 
@@ -394,13 +396,14 @@ const K = .0035, CAP = 2.6;
 // Bewusst langsamer als echtes Wasser, damit man den Strom planen und beobachten kann.
 // Zum Vergleich: flüssig {3, 1, 4} · weich {1.6, .8, 3} · mittel {1, .6, 2} · zäh {.6, .45, 2} · Honig {.35, .3, 1}
 // Schieber „Zähigkeit“: 0 = flüssig … 4 = Honig, dazwischen wird stufenlos interpoliert. Start 2.1 (knapp hinter mittel, vom Nutzer als „super satisfying“ gewählt).
-const VISC = [[3, 1, 4], [1.6, .8, 3], [1, .6, 2], [.6, .45, 2], [.35, .3, 1]];
-const V = { rate: 1.3, side: .7, spread: 3 };
+// je Stufe: Schritte pro Bild, seitliches Verlaufen, Reichweite, Höchsttempo im freien Fall (Zellen pro Schritt)
+const VISC = [[3, 1, 4, 6], [1.6, .8, 3, 5], [1, .6, 2, 4], [.6, .45, 2, 3], [.35, .3, 1, 1.5]];
+const V = { rate: 1.3, side: .7, spread: 3, vmax: 4, acc: .25 };
 let KS = K * 3 / V.rate * .5, visc = 2.1;
 function setVisc(z) {
   visc = Math.max(0, Math.min(4, z));
   const a = Math.min(3, Math.floor(visc)), t = visc - a, m = k => VISC[a][k] + (VISC[a + 1][k] - VISC[a][k]) * t;
-  V.rate = m(0); V.side = m(1); V.spread = Math.round(m(2));
+  V.rate = m(0); V.side = m(1); V.spread = Math.round(m(2)); V.vmax = m(3);
   KS = K * 3 / V.rate * .5;   // Farbauftrag pro Sekunde bleibt gleich, egal wie zäh
 }
 setVisc(visc);
@@ -408,7 +411,7 @@ let simAcc = 0;
 function simFrame() { simAcc += V.rate; while (simAcc >= 1) { step(); simAcc--; } }
 
 function move(i, j) {
-  water[j] = 1; water[i] = 0; moved[j] = tick; drift[j] = drift[i]; mom[j] = mom[i];
+  water[j] = 1; water[i] = 0; moved[j] = tick; drift[j] = drift[i]; mom[j] = mom[i]; vel[j] = vel[i];
   pa[j * 3] = pa[i * 3]; pa[j * 3 + 1] = pa[i * 3 + 1]; pa[j * 3 + 2] = pa[i * 3 + 2];
 }
 const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
@@ -433,7 +436,24 @@ function upd(x, y) {
   if (dr >= 1) { dr -= 1; p = (gk + 1) & 7; }
   drift[i] = dr;
   const [fx, fy] = DIRS[p];
-  if (fall(i, x, y, fx, fy, p & 1 ? -1 : 0, 0, 0)) { if (inside(x + fx, y + fy)) mom[(y + fy) * W + x + fx] = s; return; }   // gefallen: neuer Schwung
+  if (fall(i, x, y, fx, fy, p & 1 ? -1 : 0, 0, 0)) {
+    if (!inside(x + fx, y + fy)) return;                   // vom Blatt gefallen
+    // freier Fall mit Beschleunigung: solange darunter frei ist, wird der Tropfen schneller und fällt mehrere Zellen
+    // pro Schritt. So ist ein alter Strahl nach dem Kippen schnell weg, statt wie ein Schlauch mitzuschwenken.
+    let cx = x + fx, cy = y + fy, j = cy * W + cx;
+    const v = vel[j] = Math.min(V.vmax, vel[j] + V.acc), extra = Math.floor(v - 1 + Math.random());
+    for (let k = 0; k < extra; k++) {
+      let d2 = drift[j] + gt, p2 = gk; if (d2 >= 1) { d2 -= 1; p2 = (gk + 1) & 7; } drift[j] = d2;
+      const [ex, ey] = DIRS[p2], from = j, b2 = from * 3;
+      if (!fall(j, cx, cy, ex, ey, p2 & 1 ? -1 : 0, 0, 0)) break;
+      trail[from] = 1; trailP[b2] = pa[b2]; trailP[b2 + 1] = pa[b2 + 1]; trailP[b2 + 2] = pa[b2 + 2];
+      if (!inside(cx + ex, cy + ey)) return;
+      cx += ex; cy += ey; j = cy * W + cx;
+      trailP[b2] = pa[j * 3]; trailP[b2 + 1] = pa[j * 3 + 1]; trailP[b2 + 2] = pa[j * 3 + 2];
+    }
+    mom[j] = s; return;
+  }
+  vel[i] = 0;                                              // aufgeschlagen: Schwung weg
   // schräg (nicht durch Wandecken)
   for (const dir of [s, -s]) {
     const [dx, dy] = DIRS[(p + dir) & 7];
@@ -487,7 +507,7 @@ function emit() {
       const x = f.x + px * k + f.n[0], y = f.y + py * k + f.n[1];
       if (!inside(x, y) || Math.random() > (Math.abs(k) === 2 ? .35 : .8)) continue;
       const i = y * W + x; if (wall[i] || water[i]) continue;
-      water[i] = 1; moved[i] = tick; drift[i] = Math.random(); mom[i] = 0; pa[i * 3] = f.pig[0]; pa[i * 3 + 1] = f.pig[1]; pa[i * 3 + 2] = f.pig[2];
+      water[i] = 1; moved[i] = tick; drift[i] = Math.random(); mom[i] = 0; vel[i] = 0; pa[i * 3] = f.pig[0]; pa[i * 3 + 1] = f.pig[1]; pa[i * 3 + 2] = f.pig[2];
       if (!zen) f.left--;
     }
   }
@@ -564,7 +584,7 @@ function pressure(gx, gy) {
       for (let a = 0; a < ne; a++) if (pHe[a] < bh) { bh = pHe[a]; bi = a; }
       if (th - bh < 1.5) break;
       const from = pCells[ti], to = pEmpty[bi];
-      move(from, to); mom[to] = 0;
+      move(from, to); mom[to] = 0; vel[to] = 0;
       pCells[ti] = to; pHc[ti] = bh; ne--; pEmpty[bi] = pEmpty[ne]; pHe[bi] = pHe[ne];
       if (!ne) break;
     }
@@ -618,7 +638,11 @@ function render() {
   boxBlur(sumBuf, blurBuf, 2);
   // Wasser als zusammenhängende Fläche: Dichte weichzeichnen und mit einer Schwelle schneiden (wie Metaballs),
   // einzelne Zellen verschwinden, benachbarte verschmelzen. Farbe = gemittelte Pigmente der Nachbarn.
-  for (let i = 0, b = 0; i < N; i++, b += 3) { const w = water[i]; qW[i] = w; qP[0][i] = w * pa[b]; qP[1][i] = w * pa[b + 1]; qP[2][i] = w * pa[b + 2]; }
+  for (let i = 0, b = 0; i < N; i++, b += 3) {
+    const w = water[i], t = w ? 0 : trail[i]; qW[i] = w + t;
+    qP[0][i] = w * pa[b] + t * trailP[b]; qP[1][i] = w * pa[b + 1] + t * trailP[b + 1]; qP[2][i] = w * pa[b + 2] + t * trailP[b + 2];
+    if (trail[i]) trail[i] = trail[i] < .05 ? 0 : trail[i] * .62;
+  }
   boxBlur(qW, qWb, 1); for (let c = 0; c < 3; c++) boxBlur(qP[c], qPb[c], 1);
   for (let i = 0, b = 0, o = 0; i < N; i++, b += 3, o += 4) {
     const s = sumBuf[i], edge = s > .02 ? Math.max(0, s - blurBuf[i]) / (s + .15) : 0;
@@ -889,7 +913,7 @@ function updTools() {
 }
 function restart() {
   for (const t of TARGETS) t.cheered = false; drops = [];
-  water.fill(0); drift.fill(0); mom.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
+  water.fill(0); drift.fill(0); mom.fill(0); vel.fill(0); trail.fill(0); stain.fill(0); pa.fill(0); wet.fill(0); ops = []; ink = inkMax; erasers = erasersMax; lastStars = 0;
   for (const f of FUNNELS) f.left = f.max;
   rebuildWalls(); updTools(); progress();
 }
