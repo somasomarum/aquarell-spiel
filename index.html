@@ -140,7 +140,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 (() => {
 // ---------- Version ----------
 // Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
-const VERSION = '2.3', VERSION_NOTE = 'Schneller: Auflösung passt sich dem Bildschirm an, Wasser schneller weichgezeichnet', BUILD = '08bb742';
+const VERSION = '2.4', VERSION_NOTE = 'Wasser wässriger: wanderndes Lichtnetz, Strömungsstreifen, helle Oberfläche', BUILD = '4d5e15e';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -679,6 +679,9 @@ function render() {
     if (w || t) { const y = (i / W) | 0; if (y < yLo) yLo = y; yHi = y; }
   }
   blur3(qW, qWb, yLo, yHi); for (let c = 0; c < 3; c++) blur3(qP[c], qPb[c], yLo, yHi);
+  // Licht im Wasser (macht es „nass“): stehend ein langsam waberndes Lichtnetz wie Sonnenkringel am Grund,
+  // fließend helle Streifen, die mit der Strömung ziehen, dazu eine helle Oberflächenkante. Alles hellt nur die Lasur auf.
+  const tt = performance.now() / 1000, [gx, gy] = gvec, [ux, uy] = DIRS[(gk + 4) & 7];
   for (let i = 0, o = 3; i < N; i++, o += 4) {
     // Wasser als nasse Farblasur: unregelmäßiger Rand (Rauschen in der Schwelle), Pigment sammelt sich dunkel am Rand,
     // innen körnig wie das Papier. Wird per Multiplizieren aufs Papier gelegt, nicht deckend.
@@ -688,7 +691,20 @@ function render() {
     if (dn > th) {
       const a = Math.min(1, (dn - th) / .32), edge = 4 * a * (1 - a);
       const flow = water[i] ? vel[i] > .6 : trail[i] > 0;    // fallendes/strömendes Wasser: hell und klar, ohne Körnung und Rand
-      const k = flow ? .16 / dn : .3 / dn * gran[i] * (.75 + .5 * nz) * (1 + 2.2 * edge * edge);   // stehend: Lasur mit Pigmentrand
+      let k = flow ? .16 / dn : .3 / dn * gran[i] * (.75 + .5 * nz) * (1 + 2.2 * edge * edge);   // stehend: Lasur mit Pigmentrand
+      const x = i % W, y = (i / W) | 0;
+      if (flow) {   // hell-dunkle Streifen längs der Strömung, die mit ihr nach „unten“ wandern
+        const along = x * gx + y * gy, across = y * gx - x * gy;
+        const v = Math.sin(across * 1.3 + Math.sin(along * .21 - tt * 11) * 1.6) * .6 + Math.sin(along * .5 - tt * 14) * .4;
+        k *= 1 + .9 * v;                                     // −90 % … +90 %: deutlich sichtbar, ohne die Farbe zu verlieren
+      } else {      // Lichtnetz: zwei gegeneinander wandernde Wellenmuster, hell wo sie sich auslöschen, sonst leicht dunkler
+        const v1 = Math.sin(x * .42 + tt * 1.1 + Math.sin(y * .23 - tt * .7) * 1.7) + Math.sin(y * .37 - tt * .9 + Math.sin(x * .29 + tt * .6) * 1.4);
+        const net = Math.max(0, 1 - Math.abs(v1) * 1.3) ** 2;
+        let shine = net * .8;
+        const ax = x + ux, ay = y + uy;                      // Oberfläche: darüber (gegen die Schwerkraft) ist frei
+        if (water[i] && ax >= 0 && ay >= 0 && ax < W && ay < H && !water[ay * W + ax] && !wall[ay * W + ax]) shine = Math.max(shine, .75);
+        k *= (1 - shine) * (1.15 - .15 * net);
+      }
       qd[o - 3] = 255 * ex(qPb[0][i] * k); qd[o - 2] = 255 * ex(qPb[1][i] * k); qd[o - 1] = 255 * ex(qPb[2][i] * k);
       qd[o] = 255 * Math.min(1, a * 1.6);
     } else qd[o] = 0;
