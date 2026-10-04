@@ -159,7 +159,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 (() => {
 // ---------- Version ----------
 // Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
-const VERSION = '2.6', VERSION_NOTE = 'Vollbild mit Werkzeugen: Drehen, Stift, Radierer, Zurück oben rechts', BUILD = '0c2550a';
+const VERSION = '2.7', VERSION_NOTE = 'Fotoerkennung entscheidet mehr selbst: Blatt gerade ziehen, Lücken schließen, Farbpunkte als Zielfarben', BUILD = 'fcced3e';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -306,7 +306,10 @@ let LEVEL, FUNNELS, TARGETS, GOALS, levelNo = 0;
 const RES = 4200;   // Standard-Vorrat je Trichter, ein Level kann res setzen
 function prepLevel(k) {
   const L = LEVELS[k];
-  if (L.photo) L.shapes = PHOTO ? PHOTO.cups.map(c => ({ c: 'k', fixed: c })) : [];
+  if (L.photo) {   // eigenes Bild: Mulden als Zielflächen, Farbpunkte als Zielfarben, Trichter dort, wo die Erkennung sie hingesetzt hat
+    L.shapes = PHOTO ? PHOTO.cups.map(c => { const g = (PHOTO.goals || []).find(g => c.includes(g.cell)); return g ? { c: 'k', fixed: c, goal: g.goal, dab: g.dab } : { c: 'k', fixed: c }; }) : [];
+    if (PHOTO && PHOTO.funnels) L.funnels = PHOTO.funnels;
+  }
   LEVEL = L.shapes.map(s0 => {
     if (s0.fixed) return { ...s0 };
     const s = { ...s0 };
@@ -1109,8 +1112,8 @@ function loop(t) {
 // Foto einer Kreidezeichnung → Wände. Papier im Bild finden und zuschneiden, Licht/Schatten ausgleichen (Helligkeit durch
 // weichgezeichneten Hintergrund teilen), dunkle oder farbige Pixel sind Striche. Mulden findet ein kurzer Probelauf:
 // das ganze Blatt voll Wasser, fallen lassen – wo es liegen bleibt, ist eine Zielfläche.
-const PHOTO_LEVEL = LEVELS.push({ name: 'Eigenes Bild', photo: true, erasers: 6, ink: 200,
-  funnels: [{ c: 'blau', x: 75, y: 0, n: [0, 1] }, { c: 'rot', x: 0, y: 104, n: [1, 0] }, { c: 'gelb', x: W - 1, y: 72, n: [-1, 0] }], shapes: [] }) - 1;
+const PHOTO_FUNNELS = [{ c: 'blau', x: 75, y: 0, n: [0, 1] }, { c: 'rot', x: 0, y: 104, n: [1, 0] }, { c: 'gelb', x: W - 1, y: 72, n: [-1, 0] }];   // Standardplätze
+const PHOTO_LEVEL = LEVELS.push({ name: 'Eigenes Bild', photo: true, erasers: 6, ink: 200, funnels: PHOTO_FUNNELS, shapes: [] }) - 1;
 let PHOTO = null;
 function blurArr(src, w, h, r) {   // Kastenweichzeichner für beliebige Größe (zweimal = fast gaußförmig)
   const tmp = new Float32Array(w * h), out = new Float32Array(w * h);
@@ -1151,78 +1154,212 @@ function findCups(mask) {
   }
   return cups.sort((a, b) => b.length - a.length).slice(0, 12);
 }
-function processPhoto(img) {
-  // 1) Papier finden: Zeilen/Spalten, in denen die meisten Pixel hell sind
-  const sw = 240, sh = Math.round(sw * img.height / img.width), sc = mk(sw, sh), sx = sc.getContext('2d');
+// 1) Blatt im Foto finden: hell, ungesättigt, zusammenhängend und möglichst rechteckig. Mehrere Helligkeits-Schwellen
+// werden probiert, gewonnen hat die Fläche, die am meisten nach Blatt aussieht (groß und viereckig, nicht Tisch + Blatt).
+// Ergebnis: die vier Ecken (auch schräg oder perspektivisch verzerrt).
+function findPaper(img) {
+  const sw = 320, sh = Math.round(sw * img.height / img.width), sx = mk(sw, sh).getContext('2d');
   sx.drawImage(img, 0, 0, sw, sh);
-  const sd = sx.getImageData(0, 0, sw, sh).data, lum = new Float32Array(sw * sh), sat = new Float32Array(sw * sh);
-  let mean = 0;
-  for (let i = 0; i < sw * sh; i++) { const r = sd[i * 4], g = sd[i * 4 + 1], b = sd[i * 4 + 2];
-    lum[i] = (r * .3 + g * .59 + b * .11) / 255; sat[i] = (Math.max(r, g, b) - Math.min(r, g, b)) / 255; mean += lum[i]; }
-  mean /= sw * sh;
-  // Papier = hell und ungesättigt (Holz ist braun-gesättigt); davon die größte zusammenhängende Fläche
-  // Schwelle an der Papierhelligkeit ausrichten (90. Perzentil der ungesättigten Pixel), dann dünne Brücken auftrennen
-  const pale = []; for (let i = 0; i < sw * sh; i++) if (sat[i] < .16) pale.push(lum[i]);
+  const sd = sx.getImageData(0, 0, sw, sh).data, n = sw * sh, lum = new Float32Array(n), sat = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const r = sd[i * 4], g = sd[i * 4 + 1], b = sd[i * 4 + 2];
+    lum[i] = (r * .3 + g * .59 + b * .11) / 255; sat[i] = (Math.max(r, g, b) - Math.min(r, g, b)) / 255; }
+  const pale = []; for (let i = 0; i < n; i++) if (sat[i] < .16) pale.push(lum[i]);
   pale.sort((a, b) => a - b); const paperL = pale.length ? pale[Math.floor(pale.length * .9)] : .8;
-  const bright = Math.max(.35, paperL * .8), raw = new Uint8Array(sw * sh), isP = new Uint8Array(sw * sh), lab = new Int32Array(sw * sh);
-  for (let i = 0; i < sw * sh; i++) raw[i] = lum[i] > bright && sat[i] < .16 ? 1 : 0;
-  for (let y = 2; y < sh - 2; y++) for (let x = 2; x < sw - 2; x++) {   // Erosion um 2 Pixel
-    let ok = 1; for (let dy = -2; dy <= 2 && ok; dy++) for (let dx = -2; dx <= 2; dx++) if (!raw[(y + dy) * sw + x + dx]) { ok = 0; break; }
-    isP[y * sw + x] = ok; }
-  let best = [], bestN = 0, cur = 0;
-  for (let s0 = 0; s0 < sw * sh; s0++) { if (!isP[s0] || lab[s0]) continue;
-    cur++; const st = [s0], c = [0, 0, sw, sh, 0]; lab[s0] = cur; let x0 = sw, x1 = 0, y0 = sh, y1 = 0, n = 0;
-    while (st.length) { const i = st.pop(), x = i % sw, y = (i / sw) | 0; n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-      for (const j of [x > 0 ? i - 1 : -1, x < sw - 1 ? i + 1 : -1, i - sw, i + sw]) if (j >= 0 && j < sw * sh && isP[j] && !lab[j]) { lab[j] = cur; st.push(j); } }
-    if (n > bestN) { bestN = n; best = [x0, x1, y0, y1]; } }
-  let [x0, x1, y0, y1] = bestN > sw * sh * .12 ? [best[0] - 2, best[1] + 2, best[2] - 2, best[3] + 2] : [0, sw - 1, 0, sh - 1];   // Erosion ausgleichen; kein klares Blatt: ganzes Bild
-  const k = img.width / sw, ins = .03;   // etwas nach innen, damit kein Tischrand bleibt
-  let bx = (x0 + (x1 - x0) * ins) * k, by = (y0 + (y1 - y0) * ins) * k, bw = (x1 - x0) * (1 - 2 * ins) * k, bh = (y1 - y0) * (1 - 2 * ins) * k;
-  // 2) Hochkant und auf das Seitenverhältnis des Blatts zuschneiden, auf 3 Pixel pro Zelle
-  const rot = bw > bh, PW = W * 3, PH = H * 3, pc = mk(PW, PH), px = pc.getContext('2d');
-  const tw = rot ? bh : bw, th = rot ? bw : bh, want = W / H;
-  let cw = tw, ch = th; if (cw / ch > want) cw = ch * want; else ch = cw / want;
-  px.save();
-  if (rot) { px.translate(PW, 0); px.rotate(Math.PI / 2); }
-  const ox = (tw - cw) / 2, oy = (th - ch) / 2;
-  if (rot) px.drawImage(img, bx + oy, by + ox, ch, cw, 0, 0, PH, PW);
-  else px.drawImage(img, bx + ox, by + oy, cw, ch, 0, 0, PW, PH);
-  px.restore();
-  // 3) Licht ausgleichen, Striche erkennen
-  const id = px.getImageData(0, 0, PW, PH), d = id.data, n = PW * PH, L = new Float32Array(n), C = new Float32Array(n);
+  let best = null;
+  for (const f of [.7, .78, .85, .9, .94]) {
+    const raw = new Uint8Array(n), isP = new Uint8Array(n), lab = new Int32Array(n), thr = Math.max(.3, paperL * f);
+    for (let i = 0; i < n; i++) raw[i] = lum[i] > thr && sat[i] < .18 ? 1 : 0;
+    // Striche schließen (Kreidelinien quer übers Blatt sollen es nicht zerteilen), dann dünne Brücken zum Tisch auftrennen
+    const close = morph(morph(raw, sw, sh, 3, 1), sw, sh, 3, 0);
+    for (let y = 2; y < sh - 2; y++) for (let x = 2; x < sw - 2; x++) {
+      let ok = 1; for (let dy = -2; dy <= 2 && ok; dy++) for (let dx = -2; dx <= 2; dx++) if (!close[(y + dy) * sw + x + dx]) { ok = 0; break; }
+      isP[y * sw + x] = ok; }
+    let cur = 0;
+    for (let s0 = 0; s0 < n; s0++) { if (!isP[s0] || lab[s0]) continue;
+      cur++; const st = [s0]; lab[s0] = cur; const c = [];
+      while (st.length) { const i = st.pop(), x = i % sw; c.push(i);
+        for (const j of [x > 0 ? i - 1 : -1, x < sw - 1 ? i + 1 : -1, i - sw, i + sw]) if (j >= 0 && j < n && isP[j] && !lab[j]) { lab[j] = cur; st.push(j); } }
+      if (c.length < n * .08) continue;
+      // Ecken: Extrempunkte von x+y und x−y; Rechteckigkeit = Fläche / Fläche des Vierecks
+      let tl = 0, tr = 0, br = 0, bl = 0, vtl = 1e9, vtr = -1e9, vbr = -1e9, vbl = 1e9;
+      for (const i of c) { const x = i % sw, y = (i / sw) | 0;
+        if (x + y < vtl) { vtl = x + y; tl = i; } if (x + y > vbr) { vbr = x + y; br = i; } if (x - y > vtr) { vtr = x - y; tr = i; } if (x - y < vbl) { vbl = x - y; bl = i; } }
+      const q = [tl, tr, br, bl].map(i => [i % sw, (i / sw) | 0]);
+      let area = 0; for (let k = 0; k < 4; k++) { const [x1, y1] = q[k], [x2, y2] = q[(k + 1) % 4]; area += x1 * y2 - x2 * y1; } area = Math.abs(area) / 2;
+      const rect = Math.min(1, c.length / Math.max(1, area)), score = c.length * rect ** 6;
+      if (!best || score > best.score) best = { score, q, rect, f };
+    }
+  }
+  if (!best || best.rect < .8) return null;   // kein klares Blatt: ganzes Foto nehmen
+  findPaper.last = best;
+  const k = img.width / sw, cx = best.q.reduce((s, p) => s + p[0], 0) / 4, cy = best.q.reduce((s, p) => s + p[1], 0) / 4;
+  // Erosion ausgleichen (+2 px), dann 2 % nach innen, damit kein Tischrand bleibt
+  return best.q.map(([x, y]) => { const dx = x - cx, dy = y - cy, l = Math.hypot(dx, dy) || 1, g = (l + 2) / l * .975; return [(cx + dx * g) * k, (cy + dy * g) * k]; });
+}
+function morph(m, w, h, r, grow) {   // Wachsen (grow=1) oder Schrumpfen (0) einer 0/1-Maske um r, als Quadrat, getrennt nach Achsen
+  const t = new Uint8Array(w * h), o = new Uint8Array(w * h), want = grow ? 1 : 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = 1 - want;
+    for (let d = -r; d <= r; d++) { const X = x + d; if (X >= 0 && X < w && m[y * w + X] === want) { v = want; break; } } t[y * w + x] = v; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = 1 - want;
+    for (let d = -r; d <= r; d++) { const Y = y + d; if (Y >= 0 && Y < h && t[Y * w + x] === want) { v = want; break; } } o[y * w + x] = v; }
+  return o;
+}
+// Farbton eines Farbpunkts → Zielfarbe
+function hueName(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b); if (mx - mn < 25) return '';
+  let h = mx === r ? ((g - b) / (mx - mn)) * 60 : mx === g ? (2 + (b - r) / (mx - mn)) * 60 : (4 + (r - g) / (mx - mn)) * 60; if (h < 0) h += 360;
+  return h < 18 || h >= 330 ? 'rot' : h < 37 ? 'orange' : h < 70 ? 'gelb' : h < 170 ? 'grün' : h < 255 ? 'blau' : 'violett';
+}
+// Größere Lücken in Schalen: von jedem Strich-Ende eine Brücke zum nächsten Strich (bis 9 Zellen) probieren.
+// Behalten wird sie nur, wenn dadurch spürbar mehr Wasser stehen bleibt – sonst war die Lücke wohl gewollt.
+function bridgeGaps(mask, done = []) {
+  const lab = new Int32Array(N).fill(-1), comps = [];
+  for (let s0 = 0; s0 < N; s0++) { if (!mask[s0] || lab[s0] >= 0) continue;
+    const st = [s0], c = []; lab[s0] = comps.length;
+    while (st.length) { const i = st.pop(), x = i % W; c.push(i);
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < N && mask[j] && lab[j] < 0) { lab[j] = comps.length; st.push(j); } }
+    comps.push(c); }
+  const dist = new Int32Array(N).fill(-1);
+  const bfs = (from, k) => { for (const i of comps[k]) dist[i] = -1; dist[from] = 0; const q = [from]; let far = from;
+    for (let h = 0; h < q.length; h++) { const i = q[h], x = i % W; if (dist[i] > dist[far]) far = i;
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < N && lab[j] === k && dist[j] < 0) { dist[j] = dist[i] + 1; q.push(j); } }
+    return far; };
+  // Enden je Strich: die zwei geodätisch am weitesten auseinanderliegenden Zellen. Brücken nur von Ende zu Ende
+  // (eine Schale mit Lücke), nicht von einem Ende mitten an einen anderen Strich (das verbindet meist zwei Figuren).
+  const ends = [];
+  comps.forEach((c, k) => { if (c.length < 15) return; const A = bfs(bfs(c[0], k), k); ends.push({ i: A, k }, { i: bfs(A, k), k }); });
+  const cands = [];
+  for (let e = 0; e < ends.length; e++) for (let f = e + 1; f < ends.length; f++) {
+    const E = ends[e], F = ends[f], dd = (E.i % W - F.i % W) ** 2 + (((E.i / W) | 0) - ((F.i / W) | 0)) ** 2;
+    if (dd > 81 || dd < 4) continue;
+    if (E.k === F.k) { bfs(E.i, E.k); if (dist[F.i] < 2.5 * Math.sqrt(dd) + 6) continue; }   // beide Enden eines kurzen Strichs
+    cands.push({ a: E.i, b: F.i, d: dd });
+  }
+  cands.sort((p, q) => p.d - q.d);
+  const vol = m => findCups(m).reduce((s, c) => s + c.length, 0);
+  let cur = mask, base = vol(cur);
+  for (const { a, b } of cands.slice(0, 40)) {
+    const m = cur.slice(), ax = a % W, ay = (a / W) | 0, bx = b % W, by = (b / W) | 0, steps = Math.max(Math.abs(bx - ax), Math.abs(by - ay));
+    for (let t = 0; t <= steps; t++) { const x = Math.round(ax + (bx - ax) * t / steps), y = Math.round(ay + (by - ay) * t / steps);
+      for (const [ox, oy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) if (x + ox < W && y + oy < H) m[(y + oy) * W + x + ox] = 1; }
+    const v = vol(m); if (v - base >= 40) { cur = m; base = v; done.push([ax, ay, bx, by]); }
+  }
+  return cur;
+}
+function processPhoto(img) {
+  // 2) Blatt gerade ziehen: Viereck → Hochkant-Raster mit 3 Pixeln pro Zelle (liegt das Blatt quer, wird es gedreht)
+  const PW = W * 3, PH = H * 3, pc = mk(PW, PH), px = pc.getContext('2d');
+  const sc = Math.min(1, 1600 / Math.max(img.width, img.height)), iw = Math.round(img.width * sc), ih = Math.round(img.height * sc);
+  const ic = mk(iw, ih).getContext('2d'); ic.drawImage(img, 0, 0, iw, ih); const src = ic.getImageData(0, 0, iw, ih).data;
+  let q = findPaper(img); const found = !!q;
+  q = q ? q.map(([x, y]) => [x * sc, y * sc]) : [[0, 0], [iw - 1, 0], [iw - 1, ih - 1], [0, ih - 1]];
+  const len = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  if (len(q[0], q[1]) + len(q[3], q[2]) > len(q[0], q[3]) + len(q[1], q[2])) q = [q[3], q[0], q[1], q[2]];   // quer: linke Kante wird oben
+  const id = px.createImageData(PW, PH), d = id.data;
+  for (let Y = 0; Y < PH; Y++) for (let X = 0; X < PW; X++) {
+    const u = (X + .5) / PW, v = (Y + .5) / PH, o = (Y * PW + X) * 4;
+    const sxp = (1 - v) * ((1 - u) * q[0][0] + u * q[1][0]) + v * ((1 - u) * q[3][0] + u * q[2][0]);
+    const syp = (1 - v) * ((1 - u) * q[0][1] + u * q[1][1]) + v * ((1 - u) * q[3][1] + u * q[2][1]);
+    const x0 = Math.max(0, Math.min(iw - 2, sxp | 0)), y0 = Math.max(0, Math.min(ih - 2, syp | 0)), fx = Math.min(1, Math.max(0, sxp - x0)), fy = Math.min(1, Math.max(0, syp - y0));
+    for (let c = 0; c < 3; c++) { const i = (y0 * iw + x0) * 4 + c;
+      d[o + c] = (src[i] * (1 - fx) + src[i + 4] * fx) * (1 - fy) + (src[i + iw * 4] * (1 - fx) + src[i + iw * 4 + 4] * fx) * fy; }
+    d[o + 3] = 255;
+  }
+  // 3) Licht ausgleichen, Striche erkennen. Die Schwelle richtet sich nach dem Rauschen des Fotos (Papier-Körnung, Schatten).
+  const n = PW * PH, L = new Float32Array(n), C = new Float32Array(n);
   for (let i = 0; i < n; i++) { const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2]; L[i] = (r * .3 + g * .59 + b * .11) / 255; C[i] = (Math.max(r, g, b) - Math.min(r, g, b)) / 255; }
-  const bg = blurArr(L, PW, PH, 18), ink = new Float32Array(n), out = px.createImageData(PW, PH), o = out.data;
-  for (let i = 0; i < n; i++) {
-    const v = Math.max(0, 1 - L[i] / Math.max(.2, bg[i] * 1.02)), a = Math.min(1, Math.max(0, (v - .1) / .22 + (C[i] > .16 ? (C[i] - .16) * 3 : 0)));
-    ink[i] = a;
-    o[i * 4] = d[i * 4] * .85; o[i * 4 + 1] = d[i * 4 + 1] * .85; o[i * 4 + 2] = d[i * 4 + 2] * .85; o[i * 4 + 3] = 255 * a;
-  }
+  const bg = blurArr(L, PW, PH, 18), V = new Float32Array(n);
+  for (let i = 0; i < n; i++) V[i] = Math.max(0, 1 - L[i] / Math.max(.2, bg[i] * 1.02));
+  const smp = []; for (let i = 0; i < n; i += 7) smp.push(V[i]); smp.sort((a, b) => a - b);
+  const med = smp[smp.length >> 1], mad = smp[smp.length * .75 | 0] - med, lo = Math.min(.16, Math.max(.06, med + mad * 6));
+  let ink = new Float32Array(n);
+  for (let i = 0; i < n; i++) ink[i] = Math.min(1, Math.max(0, (V[i] - lo) / .2 + (C[i] > .16 ? (C[i] - .16) * 3 : 0)));
+  // Dünne Linien weg (Karo- und Linienpapier, Bleistift-Vorzeichnung): Öffnen mit 3×3 lässt nur Striche ab ~3 px Breite stehen
+  { const e = new Float32Array(n), o2 = new Float32Array(n);
+    for (let y = 1; y < PH - 1; y++) for (let x = 1; x < PW - 1; x++) { let m = 1; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) m = Math.min(m, ink[(y + dy) * PW + x + dx]); e[y * PW + x] = m; }
+    for (let y = 1; y < PH - 1; y++) for (let x = 1; x < PW - 1; x++) { let m = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) m = Math.max(m, e[(y + dy) * PW + x + dx]); o2[y * PW + x] = m; }
+    ink = o2; }
+  const out = px.createImageData(PW, PH), o = out.data;
+  for (let i = 0; i < n; i++) { o[i * 4] = d[i * 4] * .85; o[i * 4 + 1] = d[i * 4 + 1] * .85; o[i * 4 + 2] = d[i * 4 + 2] * .85; o[i * 4 + 3] = 255 * ink[i]; }
   px.putImageData(out, 0, 0);
-  // 4) Raster: Zelle ist Wand, wenn genug Strich drin ist; Rauschen weg, Lücken dicht
-  let mask = new Uint8Array(N);
+  // 4) Raster: Zelle ist Wand, wenn genug Strich drin ist; Farbe je Zelle merken (für Farbpunkte)
+  let mask = new Uint8Array(N); const rgb = new Float32Array(N * 4), inkS = new Float32Array(N);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    let sum = 0; for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) sum += ink[(y * 3 + dy) * PW + x * 3 + dx];
-    mask[y * W + x] = sum / 9 > .35 ? 1 : 0;
+    let sum = 0; const c = y * W + x;
+    for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) { const p = (y * 3 + dy) * PW + x * 3 + dx, a = ink[p]; sum += a;
+      rgb[c * 4] += d[p * 4] * a; rgb[c * 4 + 1] += d[p * 4 + 1] * a; rgb[c * 4 + 2] += d[p * 4 + 2] * a; rgb[c * 4 + 3] += a * C[p]; }
+    mask[c] = sum / 9 > .35 ? 1 : 0; inkS[c] = sum;
   }
+  // Tischreste: Zellen, die nicht nach Papier aussehen (dunkler oder holzbraun) und mit dem Rand verbunden sind, sind keine Striche.
+  // Mehrheit im 9×9-Fenster, damit Kreidestriche selbst nicht als Tisch zählen.
+  { const pl = []; for (let i = 0; i < n; i += 5) if (C[i] < .16) pl.push(L[i]); pl.sort((a, b) => a - b);
+    const pL = pl.length ? pl[pl.length * .9 | 0] : .8, notP = new Float32Array(N);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let k = 0; for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) { const p = (y * 3 + dy) * PW + x * 3 + dx; if (L[p] < pL * .72 || (C[p] > .12 && hueName(d[p * 4], d[p * 4 + 1], d[p * 4 + 2]) === 'orange')) k++; } notP[y * W + x] = k / 9; }
+    const sm = blurArr(notP, W, H, 4), out2 = new Uint8Array(N), st = [];
+    for (let i = 0; i < N; i++) { const x = i % W, y = (i / W) | 0; if ((x === 0 || y === 0 || x === W - 1 || y === H - 1) && sm[i] > .5) { out2[i] = 1; st.push(i); } }
+    while (st.length) { const i = st.pop(), x = i % W; for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < N && !out2[j] && sm[j] > .5) { out2[j] = 1; st.push(j); } }
+    for (let i = 0; i < N; i++) if (out2[i]) mask[i] = 0; }
+  // Rauschen (< 8 Zellen) weg
   const seen = new Uint8Array(N);
   for (let s0 = 0; s0 < N; s0++) { if (!mask[s0] || seen[s0]) continue;
     const st = [s0], c = []; seen[s0] = 1;
     while (st.length) { const i = st.pop(), x = i % W; c.push(i);
       for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < N && mask[j] && !seen[j]) { seen[j] = 1; st.push(j); } }
     if (c.length < 8) for (const i of c) mask[i] = 0; }
-  const grown = new Uint8Array(N);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (mask[y * W + x])
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if (X >= 0 && Y >= 0 && X < W && Y < H) grown[Y * W + X] = 1; }
-  mask = grown;
+  // Farbpunkte: kleine, kompakte, ausgefüllte Kleckse aus kräftig farbigen Zellen (getrennt von schwarzen Linien betrachtet)
+  const colr = new Uint8Array(N), dots = [];
+  for (let i = 0; i < N; i++) colr[i] = mask[i] && rgb[i * 4 + 3] > .25 * inkS[i] ? 1 : 0;   // mittlere Sättigung der Strichpixel
+  const seen2 = new Uint8Array(N);
+  for (let s0 = 0; s0 < N; s0++) { if (!colr[s0] || seen2[s0]) continue;
+    const st = [s0], c = []; seen2[s0] = 1; let x0 = W, x1 = 0, y0 = H, y1 = 0;
+    while (st.length) { const i = st.pop(), x = i % W, y = (i / W) | 0; c.push(i); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < N && colr[j] && !seen2[j]) { seen2[j] = 1; st.push(j); } }
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    if (c.length < 10 || bw > 14 || bh > 14 || Math.min(bw, bh) < 4 || Math.max(bw, bh) > 1.8 * Math.min(bw, bh) || c.length < .6 * bw * bh) continue;
+    let r = 0, g = 0, b = 0; for (const i of c) { r += rgb[i * 4]; g += rgb[i * 4 + 1]; b += rgb[i * 4 + 2]; }
+    const sum = r + g + b, name = sum ? hueName(r / sum * 600, g / sum * 600, b / sum * 600) : '';
+    if (name) dots.push({ x: (x0 + x1) / 2, y: (y0 + y1) / 2, goal: name, cells: c });
+  }
+  for (const dt of dots) for (const i of dt.cells) mask[i] = 0;
+  // Lücken schließen: Wachsen um 2, Schrumpfen um 1 (Lücken bis ~3 Zellen gehen zu, Striche werden 1 Zelle dicker wie bisher)
+  mask = morph(morph(mask, W, H, 2, 1), W, H, 1, 0);
+  for (const dt of dots) for (const i of dt.cells) mask[i] = 0;
   // Blattrand freiräumen: Papierkanten und ihre Schatten sind keine Striche (sonst wird das ganze Blatt eine Wanne)
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (x < 3 || y < 3 || x >= W - 3 || y >= H - 3) mask[y * W + x] = 0;
-  // Trichter freihalten
-  for (const f of LEVELS[PHOTO_LEVEL].funnels) for (let a = -4; a <= 4; a++) for (let b = 0; b < 6; b++) {
+  const bridges = []; mask = bridgeGaps(mask, bridges);
+  px.save(); px.lineWidth = 6; px.lineCap = 'round';   // Brücken sichtbar nachziehen, in der Farbe der Striche an ihren Enden
+  for (const [ax, ay, bx, by] of bridges) {
+    const c = [0, 1, 2].map(k => { let v = 0, w = 0; for (const [x, y] of [[ax, ay], [bx, by]]) for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= W || Y >= H) continue; const i = Y * W + X; v += rgb[i * 4 + k]; w += inkS[i]; } return w ? Math.round(v / w * .85) : 40; });
+    px.strokeStyle = `rgba(${c.join(',')},.9)`; px.beginPath(); px.moveTo(ax * 3 + 3, ay * 3 + 3); px.lineTo(bx * 3 + 3, by * 3 + 3); px.stroke(); }
+  px.restore();
+  const cups = findCups(mask);
+  // Trichter: an der Standardstelle, außer dort ist ein Strich – dann am Rand entlang zur nächsten freien Stelle.
+  // Der obere Trichter sitzt über der größten Mulde.
+  const free = (f, x, y) => { for (let a = -4; a <= 4; a++) for (let b = 0; b < 6; b++) { const X = x + (-f.n[1]) * a + f.n[0] * b, Y = y + f.n[0] * a + f.n[1] * b;
+    if (X >= 0 && Y >= 0 && X < W && Y < H && mask[Y * W + X]) return false; } return true; };
+  const funnels = PHOTO_FUNNELS.map((f, k) => {
+    let x0 = f.x, y0 = f.y;
+    if (k === 0 && cups.length) x0 = Math.round(cups[0].reduce((s, i) => s + i % W, 0) / cups[0].length);
+    for (let s = 0; s < 60; s++) for (const sg of s ? [1, -1] : [1]) {
+      const x = f.n[0] ? x0 : Math.max(8, Math.min(W - 9, x0 + s * sg)), y = f.n[0] ? Math.max(8, Math.min(H - 9, y0 + s * sg)) : y0;
+      if (free(f, x, y)) return { ...f, x, y };
+    }
+    return f;
+  });
+  for (const f of funnels) for (let a = -4; a <= 4; a++) for (let b = 0; b < 6; b++) {   // falls nirgends frei: dort radieren
     const x = f.x + (-f.n[1]) * a + f.n[0] * b, y = f.y + f.n[0] * a + f.n[1] * b; if (x >= 0 && y >= 0 && x < W && y < H) mask[y * W + x] = 0; }
-  return { mask, img: pc, cups: findCups(mask) };
+  const cups2 = findCups(mask);
+  // Farbpunkte der nächsten Mulde zuordnen (im Punkt oder höchstens 12 Zellen daneben)
+  const goals = [];
+  for (const dt of dots) {
+    let bestK = -1, bestD = 12 * 12;
+    cups2.forEach((c, k) => { for (const i of c) { const dd = (i % W - dt.x) ** 2 + ((i / W | 0) - dt.y) ** 2; if (dd < bestD) { bestD = dd; bestK = k; } } });
+    if (bestK >= 0 && !goals.some(g => g.cup === bestK)) goals.push({ cup: bestK, cell: cups2[bestK][0], goal: dt.goal, dab: [Math.round(dt.x), Math.round(dt.y)] });
+  }
+  return { mask, img: pc, cups: cups2, goals, funnels, info: { blatt: found && findPaper.last && { q: q.map(p => p.map(v => Math.round(v / sc))), rect: +findPaper.last.rect.toFixed(2) }, schwelle: +lo.toFixed(3), bruecken: bridges.length, punkte: dots.map(d => d.goal) } };
 }
 function savePhoto() {
-  try { let m = ''; for (const v of PHOTO.mask) m += v; localStorage.setItem('aquarell-photo', JSON.stringify({ mask: m, img: PHOTO.img.toDataURL('image/png') })); }
+  try { let m = ''; for (const v of PHOTO.mask) m += v; localStorage.setItem('aquarell-photo', JSON.stringify({ mask: m, img: PHOTO.img.toDataURL('image/png'), goals: PHOTO.goals, funnels: PHOTO.funnels })); }
   catch (e) { toast('Bild ist zu groß zum Merken – spielbar bis zum Neuladen'); }
 }
 function loadPhoto() {
@@ -1230,7 +1367,7 @@ function loadPhoto() {
     const j = JSON.parse(localStorage.getItem('aquarell-photo') || 'null'); if (!j) return;
     const mask = new Uint8Array(N); for (let i = 0; i < N; i++) mask[i] = j.mask.charCodeAt(i) === 49 ? 1 : 0;
     const im = new Image(); im.onload = () => { const c = mk(im.width, im.height); c.getContext('2d').drawImage(im, 0, 0);
-      PHOTO = { mask, img: c, cups: findCups(mask) }; buildLevelButtons(); if (levelNo === PHOTO_LEVEL) setLevel(PHOTO_LEVEL, true); };
+      PHOTO = { mask, img: c, cups: findCups(mask), goals: j.goals || [], funnels: j.funnels }; buildLevelButtons(); if (levelNo === PHOTO_LEVEL) setLevel(PHOTO_LEVEL, true); };
     im.src = j.img;
   } catch (e) {}
 }
@@ -1241,7 +1378,7 @@ document.getElementById('photoIn').onchange = e => {
   const url = URL.createObjectURL(f), im = new Image();
   im.onload = () => { URL.revokeObjectURL(url);
     PHOTO = processPhoto(im); savePhoto(); buildLevelButtons(); setLevel(PHOTO_LEVEL, true); closeMenu();
-    toast(PHOTO.cups.length ? `Dein Bild! ${PHOTO.cups.length} Mulden zum Füllen` : 'Dein Bild! Keine Mulden gefunden – einfach malen'); };
+    toast(PHOTO.cups.length ? `Dein Bild! ${PHOTO.cups.length} Mulden zum Füllen` + (PHOTO.goals.length ? `, ${PHOTO.goals.length} mit Farbe` : '') : 'Dein Bild! Keine Mulden gefunden – einfach malen'); };
   im.onerror = () => toast('Bild ließ sich nicht öffnen');
   im.src = url; e.target.value = '';
 };
@@ -1283,7 +1420,7 @@ document.getElementById('go').focus();
 layout(); requestAnimationFrame(loop);
 // Test-Hilfe: n Frames ohne Warten vorspulen
 function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3 === 0) bleed(); } stainDirty = true; render(); progress(); }
-window.__aquarell = { step, advance, water, stain, setLevel, get TARGETS() { return TARGETS; }, get GOALS() { return GOALS; }, setFluid: v => { fluid = v; }, setVisc, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
+window.__aquarell = { step, advance, water, stain, setLevel, get TARGETS() { return TARGETS; }, get GOALS() { return GOALS; }, setFluid: v => { fluid = v; }, setVisc, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; }, processPhoto };
 // ---------- Vollbild ----------
 // ⛶ klappt Kopfzeile und Werkzeuge ein, das Blatt bekommt den ganzen Platz; oben rechts bleiben Werkzeuge, Sterne, ⚙ und ⛶.
 // Wo der Browser es kann, geht er zusätzlich ins echte Vollbild (ohne Adressleiste). iPhone-Safari kann das nicht, dort nur einklappen.
