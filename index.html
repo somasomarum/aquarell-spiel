@@ -93,6 +93,17 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 .go:active{transform:translateY(4px);box-shadow:0 2px 0 #173f87}
 .go:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
 .start-hint{font-family:var(--display);font-size:1.15rem;color:#5a5260;margin:18px 0 0}
+/* Vollbild: Kopfzeile und Werkzeuge eingeklappt, das Blatt bekommt den ganzen Bildschirm. Oben rechts bleiben Sterne, ⚙ und ⛶. */
+.corner{position:absolute;top:6px;right:6px;z-index:4;display:flex;align-items:center;gap:6px}
+.corner button{font:600 1.1rem var(--body);color:var(--ink);background:rgba(44,31,23,.72);border:1.5px solid var(--chip-line);border-radius:10px;
+  min-width:40px;min-height:40px;padding:0 8px;cursor:pointer;backdrop-filter:blur(3px)}
+.corner button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.corner .stars{background:rgba(44,31,23,.72);border-radius:10px;padding:5px 8px;font-size:1.05rem;line-height:1}
+#miniStars,#miniMenu{display:none}
+.app.full{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.app.full header,.app.full .tools{display:none}
+.app.full #miniStars,.app.full #miniMenu{display:inline-block}
+.app:not(.full) .corner button{opacity:.7}
 #toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--paper);color:#2a2026;
   font-family:var(--display);font-size:1.2rem;padding:6px 16px;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.4);
   transition:opacity .4s;opacity:0;pointer-events:none;z-index:3}
@@ -111,7 +122,8 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
     <h1>Aqua<span>rell</span><small class="ver" id="ver"></small></h1>
     <div class="score"><span id="filled">0 / 0 Formen gefüllt</span><span class="stars" id="stars" aria-label="Sterne">★★★</span></div>
   </header>
-  <div class="stage" id="stage"><div id="paper"><canvas id="lPaper"></canvas><canvas id="lDyn"></canvas><canvas id="lTop"></canvas></div><canvas id="fx"></canvas><div id="bigstars" aria-hidden="true">★★★</div><div id="toast"></div></div>
+  <div class="stage" id="stage"><div id="paper"><canvas id="lPaper"></canvas><canvas id="lDyn"></canvas><canvas id="lTop"></canvas></div><canvas id="fx"></canvas><div id="bigstars" aria-hidden="true">★★★</div><div id="toast"></div>
+    <div class="corner"><span class="stars" id="miniStars" aria-hidden="true"></span><button id="miniMenu" class="gear" title="Einstellungen" aria-label="Einstellungen">⚙</button><button id="fullBtn" aria-pressed="false" title="Vollbild: nur das Blatt (F)" aria-label="Vollbild">⛶</button></div></div>
   <div class="tools">
     <button id="toolTurn" aria-pressed="true" title="Drehen: Blatt mit dem Finger oder der Maus kippen (D)">Drehen</button>
     <button id="toolPen" aria-pressed="false" title="Stift: eigene Linien (begrenzte Tinte)">Stift <span class="meter"><i id="inkBar"></i></span></button>
@@ -128,10 +140,11 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
       <div class="row"><span>Zähigkeit</span><div class="visc"><small>Wasser</small><input type="range" id="visc" min="0" max="4" step="0.05" value="2.1" aria-label="Zähigkeit: Wasser bis Honig"><small>Honig</small></div></div>
       <div class="row"><span>Wasser</span><button id="fluidBtn" aria-pressed="true" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: flüssig</button></div>
       <div class="row" id="tiltRow" hidden><span>Handy neigen</span><button id="tiltBtn" aria-pressed="false" title="iPhone/Handy neigen statt ziehen">Neigen</button></div>
+      <div class="row"><span>Nur das Blatt zeigen, Leisten einklappen</span><button id="fullRow" aria-pressed="false" title="Vollbild (F)">⛶ Vollbild</button></div>
       <div class="row"><span>Grafik</span><div class="levels" id="gfx"></div></div>
       <div class="row"><span>Unbegrenzt Wasser, Tinte, Radierer</span><button id="zen" aria-pressed="false" title="Kindermodus: unbegrenzt Wasser, Tinte und Radierer">Kindermodus</button></div>
       <div class="row"><span>Blatt neu beginnen</span><button id="restart" title="Blatt neu beginnen">Neu</button></div>
-      <p class="keys">Ziehen oder Mausrad dreht das Blatt. Tasten: Q/E drehen · D Drehen · P Stift · R Radierer · Z zurück · W Wasser</p>
+      <p class="keys">Ziehen oder Mausrad dreht das Blatt. Tasten: Q/E drehen · D Drehen · P Stift · R Radierer · Z zurück · W Wasser · F Vollbild</p>
     </div>
   </div>
 </div>
@@ -140,7 +153,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 (() => {
 // ---------- Version ----------
 // Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
-const VERSION = '2.4', VERSION_NOTE = 'Wasser wässriger: wanderndes Lichtnetz, Strömungsstreifen, helle Oberfläche', BUILD = '4d5e15e';
+const VERSION = '2.5', VERSION_NOTE = 'Vollbild: Leisten einklappen (⛶ oben rechts oder F)', BUILD = 'b036643';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -836,7 +849,7 @@ function progress() {
   }
   const avg = sum / TARGETS.length, stars = avg >= .85 ? 3 : avg >= .6 ? 2 : avg >= .35 ? 1 : 0;
   const f = document.getElementById('filled'); f.textContent = `L${levelNo + 1} · ${done}/${TARGETS.length} Formen` + (GOALS.length ? ` · ${colors}/${GOALS.length} Farben` : ''); f.title = `Schnitt ${Math.round(avg * 100)} %`;
-  document.getElementById('stars').innerHTML = '<b>' + '★'.repeat(stars) + '</b>' + '★'.repeat(3 - stars);
+  document.getElementById('stars').innerHTML = document.getElementById('miniStars').innerHTML = '<b>' + '★'.repeat(stars) + '</b>' + '★'.repeat(3 - stars);
   updateHatch();
   if (stars > lastStars) celebrate(stars);
   if (stars > lastStars) toast(['', 'Erster Stern!', 'Zweiter Stern!', levelNo < LEVELS.length - 1 ? 'Drei Sterne! Nächstes Level im ⚙-Menü' : 'Drei Sterne. Das Bild ist fertig.'][stars]);
@@ -925,7 +938,7 @@ function toGrid(e) {
 let turn = null;
 const ptrAng = e => { const r = stage.getBoundingClientRect(); return Math.atan2(e.clientY - r.top - r.height / 2, e.clientX - r.left - r.width / 2) * 180 / Math.PI; };
 stage.addEventListener('pointerdown', e => {
-  if (tool !== 'turn' && cv.contains(e.target)) return;
+  if ((tool !== 'turn' && cv.contains(e.target)) || e.target.closest('.corner')) return;   // Knöpfe oben rechts nicht als Drehen werten
   stage.setPointerCapture(e.pointerId); turn = { a0: ptrAng(e), ang0: ang };
 });
 stage.addEventListener('pointermove', e => {
@@ -1052,7 +1065,7 @@ buildLevelButtons();
 // Einstellungen auf- und zuklappen
 const menu = document.getElementById('menu'), menuBtn = document.getElementById('menuBtn');
 function openMenu() { menu.hidden = false; menuBtn.setAttribute('aria-expanded', true); document.getElementById('menuClose').focus(); }
-function closeMenu() { if (menu.hidden) return; menu.hidden = true; menuBtn.setAttribute('aria-expanded', false); menuBtn.focus(); }
+function closeMenu() { if (menu.hidden) return; menu.hidden = true; menuBtn.setAttribute('aria-expanded', false); (full ? document.getElementById('miniMenu') : menuBtn).focus(); }
 menuBtn.onclick = () => menu.hidden ? openMenu() : closeMenu();
 document.getElementById('menuClose').onclick = closeMenu; document.getElementById('menuBack').onclick = closeMenu;
 addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
@@ -1071,6 +1084,7 @@ addEventListener('keydown', e => {
   else if (k === 'z') undo();
   else if (k === 'p') setTool('pen');
   else if (k === 'r') setTool('erase');
+  else if (k === 'f') toggleFull();
 });
 addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (['q', 'e', 'arrowleft', 'arrowright'].includes(k)) stopSpin(); });
 
@@ -1263,6 +1277,34 @@ layout(); requestAnimationFrame(loop);
 // Test-Hilfe: n Frames ohne Warten vorspulen
 function advance(n) { for (let k = 0; k < n; k++) { simFrame(); dry(); if (k % 3 === 0) bleed(); } stainDirty = true; render(); progress(); }
 window.__aquarell = { step, advance, water, stain, setLevel, get TARGETS() { return TARGETS; }, get GOALS() { return GOALS; }, setFluid: v => { fluid = v; }, setVisc, rotate: d => setAng(ang + d * 90), setAng, get tilt() { return tilt; } };
+// ---------- Vollbild ----------
+// ⛶ klappt Kopfzeile und Werkzeuge ein, das Blatt bekommt den ganzen Platz; oben rechts bleiben Sterne, ⚙ und ⛶.
+// Wo der Browser es kann, geht er zusätzlich ins echte Vollbild (ohne Adressleiste). iPhone-Safari kann das nicht, dort nur einklappen.
+let full = false, fsOurs = false;
+const app = document.querySelector('.app'), fsEl = document.documentElement;
+const fsNow = () => document.fullscreenElement || document.webkitFullscreenElement;
+const fsReq = fsEl.requestFullscreen || fsEl.webkitRequestFullscreen;
+function enterFs() {
+  if (!fsReq || fsNow()) return;
+  try { const p = fsReq.call(fsEl); fsOurs = true; if (p && p.catch) p.catch(() => { fsOurs = false; }); } catch (e) { fsOurs = false; }
+}
+function setFull(on, viaUser) {
+  full = on; app.classList.toggle('full', on);
+  for (const id of ['fullBtn', 'fullRow']) document.getElementById(id).setAttribute('aria-pressed', on);
+  document.getElementById('fullBtn').textContent = on ? '⤡' : '⛶';
+  try { localStorage.setItem('aquarell-full', on ? '1' : '0'); } catch (e) {}
+  if (viaUser) { if (on) enterFs(); else if (fsOurs && fsNow()) { fsOurs = false; (document.exitFullscreen || document.webkitExitFullscreen).call(document); } }
+  layout(); clearTimeout(fitT); fitT = setTimeout(() => { if (quality === 'auto') applyQuality(); }, 400);
+}
+function toggleFull() { setFull(!full, true); }
+document.getElementById('fullBtn').onclick = toggleFull;
+document.getElementById('fullRow').onclick = () => { closeMenu(); toggleFull(); };
+document.getElementById('miniMenu').onclick = openMenu;
+// Verlässt man das Browser-Vollbild selbst (Esc, Wischgeste), kommen auch die Leisten zurück.
+for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => { if (!fsNow() && fsOurs) { fsOurs = false; if (full) setFull(false); } });
+// Gemerkt wird nur das Einklappen; echtes Vollbild braucht einen Fingertipp – den liefert „Los!“.
+try { if (localStorage.getItem('aquarell-full') === '1') setFull(true); } catch (e) {}
+document.getElementById('go').addEventListener('click', () => { if (full) enterFs(); });
 })();
 </script>
 <script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));</script>
