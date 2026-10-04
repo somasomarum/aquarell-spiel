@@ -1,7 +1,7 @@
 // Service Worker der Spielseite: macht Aquarell offline spielbar.
 // Seite: erst Netz (damit Updates sofort ankommen), ohne Netz aus dem Speicher.
 // Alles andere (Symbole, Schriften von Google): aus dem Speicher, im Hintergrund auffrischen.
-const CACHE = 'aquarell-d8308a0';
+const CACHE = 'aquarell-08bb742';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
