@@ -118,6 +118,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
     <div class="sheet-card" role="dialog" aria-label="Einstellungen">
       <div class="sheet-head"><b>Einstellungen</b><button id="menuClose" aria-label="Schließen">✕</button></div>
       <div class="row"><span>Level</span><div class="levels" id="levels"></div></div>
+      <div class="row"><span>Eigenes Bild: Kreide auf weißem Papier, Blatt möglichst formatfüllend fotografieren</span><button id="photoBtn">📷 Foto</button><input type="file" id="photoIn" accept="image/*" capture="environment" hidden></div>
       <div class="row"><span>Zähigkeit</span><div class="visc"><small>Wasser</small><input type="range" id="visc" min="0" max="4" step="0.05" value="2.1" aria-label="Zähigkeit: Wasser bis Honig"><small>Honig</small></div></div>
       <div class="row"><span>Wasser</span><button id="fluidBtn" aria-pressed="true" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: flüssig</button></div>
       <div class="row" id="tiltRow" hidden><span>Handy neigen</span><button id="tiltBtn" aria-pressed="false" title="iPhone/Handy neigen statt ziehen">Neigen</button></div>
@@ -133,7 +134,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 (() => {
 // ---------- Version ----------
 // Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.19', VERSION_NOTE = 'Wasser klarer: fallend hell und durchscheinend, Aufprall läuft zur Seite weg', BUILD = 'a7890c1';
+const VERSION = '0.20', VERSION_NOTE = 'Eigenes Bild: Kreidezeichnung fotografieren und spielen (⚙ → 📷 Foto)', BUILD = 'ce232a9';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
@@ -280,7 +281,9 @@ let LEVEL, FUNNELS, TARGETS, GOALS, levelNo = 0;
 const RES = 4200;   // Standard-Vorrat je Trichter, ein Level kann res setzen
 function prepLevel(k) {
   const L = LEVELS[k];
+  if (L.photo) L.shapes = PHOTO ? PHOTO.cups.map(c => ({ c: 'k', fixed: c })) : [];
   LEVEL = L.shapes.map(s0 => {
+    if (s0.fixed) return { ...s0 };
     const s = { ...s0 };
     if (!s.dense) s.dense = catmull(s.pts, false, PER);
     if (s.target) {
@@ -292,7 +295,7 @@ function prepLevel(k) {
     return s;
   });
   FUNNELS = L.funnels.map(f => ({ name: FCOL[f.c][0], col: FCOL[f.c][1], pig: PIG[f.c], x: f.x, y: f.y, n: f.n, max: L.res || RES }));
-  TARGETS = LEVEL.filter(s => s.poly); GOALS = TARGETS.filter(s => s.goal);
+  TARGETS = LEVEL.filter(s => s.poly || s.fixed); GOALS = TARGETS.filter(s => s.goal);
   inkMax = L.ink; erasersMax = L.erasers;
 }
 
@@ -371,7 +374,8 @@ function eraseAt(x, y, r) {
 }
 function rebuildWalls() {
   wall.fill(0); wctx.clearRect(0, 0, wallC.width, wallC.height);
-  for (const s of LEVEL) { crayonPath(s.dense, CRAYON[s.c], 2.7); rasterLine(s.dense, 1.35); }
+  for (const s of LEVEL) if (s.dense) { crayonPath(s.dense, CRAYON[s.c], 2.7); rasterLine(s.dense, 1.35); }
+  if (LEVELS[levelNo].photo && PHOTO) { wall.set(PHOTO.mask); wctx.drawImage(PHOTO.img, 0, 0, wallC.width, wallC.height); }   // eigenes Bild
   for (const op of ops) {
     if (op.type === 'stroke') { crayonPath(op.pts, CRAYON.p, 2.2); rasterLine(op.pts, 1.15); }
     else eraseAt(op.x, op.y, op.r);
@@ -380,6 +384,7 @@ function rebuildWalls() {
   computeRegions();
 }
 function computeRegions() {
+  for (const s of LEVEL) if (s.fixed) s.cells = s.fixed.filter(i => !wall[i]);
   for (const s of LEVEL) if (s.poly) {
     s.cells = [];
     let x0 = W, x1 = 0, y0 = H, y1 = 0;
@@ -975,8 +980,12 @@ function setLevel(k, quiet) {
   if (LEVELS[levelNo].fluid && !fluid) { fluid = true; showFluid(); note = ' (Wasser auf flüssig gestellt)'; }   // Luft und Druck gibt es nur flüssig
   if (!quiet) toast(`Level ${levelNo + 1}: ${LEVELS[levelNo].name}${note}`);
 }
-LEVELS.forEach((L, i) => { const b = document.createElement('button'); b.textContent = `${i + 1} ${L.name}`; b.setAttribute('aria-pressed', i === levelNo);
-  b.onclick = () => { setLevel(i); closeMenu(); }; document.getElementById('levels').appendChild(b); });
+function buildLevelButtons() {
+  const box = document.getElementById('levels'); box.innerHTML = '';
+  LEVELS.forEach((L, i) => { if (L.photo && !PHOTO) return; const b = document.createElement('button'); b.textContent = L.photo ? '📷 ' + L.name : `${i + 1} ${L.name}`;
+    b.setAttribute('aria-pressed', i === levelNo); b.onclick = () => { setLevel(i); closeMenu(); }; box.appendChild(b); });
+}
+buildLevelButtons();
 // Einstellungen auf- und zuklappen
 const menu = document.getElementById('menu'), menuBtn = document.getElementById('menuBtn');
 function openMenu() { menu.hidden = false; menuBtn.setAttribute('aria-expanded', true); document.getElementById('menuClose').focus(); }
@@ -1012,6 +1021,148 @@ function loop(t) {
   if (++frame % 20 === 0) progress();
   requestAnimationFrame(loop);
 }
+// ---------- Eigenes Bild ----------
+// Foto einer Kreidezeichnung → Wände. Papier im Bild finden und zuschneiden, Licht/Schatten ausgleichen (Helligkeit durch
+// weichgezeichneten Hintergrund teilen), dunkle oder farbige Pixel sind Striche. Mulden findet ein kurzer Probelauf:
+// das ganze Blatt voll Wasser, fallen lassen – wo es liegen bleibt, ist eine Zielfläche.
+const PHOTO_LEVEL = LEVELS.push({ name: 'Eigenes Bild', photo: true, erasers: 6, ink: 200,
+  funnels: [{ c: 'blau', x: 75, y: 0, n: [0, 1] }, { c: 'rot', x: 0, y: 104, n: [1, 0] }, { c: 'gelb', x: W - 1, y: 72, n: [-1, 0] }], shapes: [] }) - 1;
+let PHOTO = null;
+function blurArr(src, w, h, r) {   // Kastenweichzeichner für beliebige Größe (zweimal = fast gaußförmig)
+  const tmp = new Float32Array(w * h), out = new Float32Array(w * h);
+  for (let pass = 0; pass < 2; pass++) {
+    const a = pass ? out : src;
+    for (let y = 0; y < h; y++) { let acc = 0; for (let x = -r; x <= r; x++) acc += a[y * w + Math.min(w - 1, Math.max(0, x))];
+      for (let x = 0; x < w; x++) { tmp[y * w + x] = acc / (2 * r + 1); acc += a[y * w + Math.min(w - 1, x + r + 1)] - a[y * w + Math.max(0, x - r)]; } }
+    for (let x = 0; x < w; x++) { let acc = 0; for (let y = -r; y <= r; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+      for (let y = 0; y < h; y++) { out[y * w + x] = acc / (2 * r + 1); acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x]; } }
+  }
+  return out;
+}
+function findCups(mask) {
+  // Überlaufhöhe je Zelle (Priority-Flood): wie hoch müsste Wasser hier steigen, um über den Blattrand (unten/seitlich)
+  // abzufließen? Liegt sie über der Zelle, steht dort Wasser – die Zelle gehört zu einer Mulde (bis genau zum Rand).
+  const INF = 1e9, lvl = new Int32Array(N).fill(INF), done = new Uint8Array(N), hgt = i => H - 1 - ((i / W) | 0), buckets = [];
+  const push = (i, l) => { lvl[i] = l; (buckets[l] ||= []).push(i); };
+  for (let i = 0; i < N; i++) { const x = i % W, y = (i / W) | 0; if (!mask[i] && (y === H - 1 || x === 0 || x === W - 1)) push(i, hgt(i)); }
+  for (let l = 0; l < buckets.length; l++) {
+    const bk = buckets[l]; if (!bk) continue;
+    for (let k = 0; k < bk.length; k++) {
+      const i = bk[k]; if (done[i] || lvl[i] !== l) continue; done[i] = 1;
+      const x = i % W;
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) {
+        if (j < 0 || j >= N || mask[j] || done[j]) continue;
+        const nl = Math.max(l, hgt(j)); if (nl < lvl[j]) push(j, nl);
+      }
+    }
+  }
+  const wet = new Uint8Array(N); for (let i = 0; i < N; i++) wet[i] = !mask[i] && lvl[i] > hgt(i) ? 1 : 0;   // INF = ganz umschlossen
+  const seen = new Uint8Array(N), cups = [];
+  for (let s0 = 0; s0 < N; s0++) {
+    if (!wet[s0] || seen[s0]) continue;
+    const st = [s0], c = []; seen[s0] = 1;
+    while (st.length) { const i = st.pop(), x = i % W; c.push(i);
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < N && wet[j] && !seen[j]) { seen[j] = 1; st.push(j); } }
+    if (c.length >= 25) cups.push(c);
+  }
+  return cups.sort((a, b) => b.length - a.length).slice(0, 12);
+}
+function processPhoto(img) {
+  // 1) Papier finden: Zeilen/Spalten, in denen die meisten Pixel hell sind
+  const sw = 240, sh = Math.round(sw * img.height / img.width), sc = mk(sw, sh), sx = sc.getContext('2d');
+  sx.drawImage(img, 0, 0, sw, sh);
+  const sd = sx.getImageData(0, 0, sw, sh).data, lum = new Float32Array(sw * sh), sat = new Float32Array(sw * sh);
+  let mean = 0;
+  for (let i = 0; i < sw * sh; i++) { const r = sd[i * 4], g = sd[i * 4 + 1], b = sd[i * 4 + 2];
+    lum[i] = (r * .3 + g * .59 + b * .11) / 255; sat[i] = (Math.max(r, g, b) - Math.min(r, g, b)) / 255; mean += lum[i]; }
+  mean /= sw * sh;
+  // Papier = hell und ungesättigt (Holz ist braun-gesättigt); davon die größte zusammenhängende Fläche
+  // Schwelle an der Papierhelligkeit ausrichten (90. Perzentil der ungesättigten Pixel), dann dünne Brücken auftrennen
+  const pale = []; for (let i = 0; i < sw * sh; i++) if (sat[i] < .16) pale.push(lum[i]);
+  pale.sort((a, b) => a - b); const paperL = pale.length ? pale[Math.floor(pale.length * .9)] : .8;
+  const bright = Math.max(.35, paperL * .8), raw = new Uint8Array(sw * sh), isP = new Uint8Array(sw * sh), lab = new Int32Array(sw * sh);
+  for (let i = 0; i < sw * sh; i++) raw[i] = lum[i] > bright && sat[i] < .16 ? 1 : 0;
+  for (let y = 2; y < sh - 2; y++) for (let x = 2; x < sw - 2; x++) {   // Erosion um 2 Pixel
+    let ok = 1; for (let dy = -2; dy <= 2 && ok; dy++) for (let dx = -2; dx <= 2; dx++) if (!raw[(y + dy) * sw + x + dx]) { ok = 0; break; }
+    isP[y * sw + x] = ok; }
+  let best = [], bestN = 0, cur = 0;
+  for (let s0 = 0; s0 < sw * sh; s0++) { if (!isP[s0] || lab[s0]) continue;
+    cur++; const st = [s0], c = [0, 0, sw, sh, 0]; lab[s0] = cur; let x0 = sw, x1 = 0, y0 = sh, y1 = 0, n = 0;
+    while (st.length) { const i = st.pop(), x = i % sw, y = (i / sw) | 0; n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (const j of [x > 0 ? i - 1 : -1, x < sw - 1 ? i + 1 : -1, i - sw, i + sw]) if (j >= 0 && j < sw * sh && isP[j] && !lab[j]) { lab[j] = cur; st.push(j); } }
+    if (n > bestN) { bestN = n; best = [x0, x1, y0, y1]; } }
+  let [x0, x1, y0, y1] = bestN > sw * sh * .12 ? [best[0] - 2, best[1] + 2, best[2] - 2, best[3] + 2] : [0, sw - 1, 0, sh - 1];   // Erosion ausgleichen; kein klares Blatt: ganzes Bild
+  const k = img.width / sw, ins = .03;   // etwas nach innen, damit kein Tischrand bleibt
+  let bx = (x0 + (x1 - x0) * ins) * k, by = (y0 + (y1 - y0) * ins) * k, bw = (x1 - x0) * (1 - 2 * ins) * k, bh = (y1 - y0) * (1 - 2 * ins) * k;
+  // 2) Hochkant und auf das Seitenverhältnis des Blatts zuschneiden, auf 3 Pixel pro Zelle
+  const rot = bw > bh, PW = W * 3, PH = H * 3, pc = mk(PW, PH), px = pc.getContext('2d');
+  const tw = rot ? bh : bw, th = rot ? bw : bh, want = W / H;
+  let cw = tw, ch = th; if (cw / ch > want) cw = ch * want; else ch = cw / want;
+  px.save();
+  if (rot) { px.translate(PW, 0); px.rotate(Math.PI / 2); }
+  const ox = (tw - cw) / 2, oy = (th - ch) / 2;
+  if (rot) px.drawImage(img, bx + oy, by + ox, ch, cw, 0, 0, PH, PW);
+  else px.drawImage(img, bx + ox, by + oy, cw, ch, 0, 0, PW, PH);
+  px.restore();
+  // 3) Licht ausgleichen, Striche erkennen
+  const id = px.getImageData(0, 0, PW, PH), d = id.data, n = PW * PH, L = new Float32Array(n), C = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2]; L[i] = (r * .3 + g * .59 + b * .11) / 255; C[i] = (Math.max(r, g, b) - Math.min(r, g, b)) / 255; }
+  const bg = blurArr(L, PW, PH, 18), ink = new Float32Array(n), out = px.createImageData(PW, PH), o = out.data;
+  for (let i = 0; i < n; i++) {
+    const v = Math.max(0, 1 - L[i] / Math.max(.2, bg[i] * 1.02)), a = Math.min(1, Math.max(0, (v - .1) / .22 + (C[i] > .16 ? (C[i] - .16) * 3 : 0)));
+    ink[i] = a;
+    o[i * 4] = d[i * 4] * .85; o[i * 4 + 1] = d[i * 4 + 1] * .85; o[i * 4 + 2] = d[i * 4 + 2] * .85; o[i * 4 + 3] = 255 * a;
+  }
+  px.putImageData(out, 0, 0);
+  // 4) Raster: Zelle ist Wand, wenn genug Strich drin ist; Rauschen weg, Lücken dicht
+  let mask = new Uint8Array(N);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let sum = 0; for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) sum += ink[(y * 3 + dy) * PW + x * 3 + dx];
+    mask[y * W + x] = sum / 9 > .35 ? 1 : 0;
+  }
+  const seen = new Uint8Array(N);
+  for (let s0 = 0; s0 < N; s0++) { if (!mask[s0] || seen[s0]) continue;
+    const st = [s0], c = []; seen[s0] = 1;
+    while (st.length) { const i = st.pop(), x = i % W; c.push(i);
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && j < N && mask[j] && !seen[j]) { seen[j] = 1; st.push(j); } }
+    if (c.length < 8) for (const i of c) mask[i] = 0; }
+  const grown = new Uint8Array(N);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (mask[y * W + x])
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if (X >= 0 && Y >= 0 && X < W && Y < H) grown[Y * W + X] = 1; }
+  mask = grown;
+  // Blattrand freiräumen: Papierkanten und ihre Schatten sind keine Striche (sonst wird das ganze Blatt eine Wanne)
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (x < 3 || y < 3 || x >= W - 3 || y >= H - 3) mask[y * W + x] = 0;
+  // Trichter freihalten
+  for (const f of LEVELS[PHOTO_LEVEL].funnels) for (let a = -4; a <= 4; a++) for (let b = 0; b < 6; b++) {
+    const x = f.x + (-f.n[1]) * a + f.n[0] * b, y = f.y + f.n[0] * a + f.n[1] * b; if (x >= 0 && y >= 0 && x < W && y < H) mask[y * W + x] = 0; }
+  return { mask, img: pc, cups: findCups(mask) };
+}
+function savePhoto() {
+  try { let m = ''; for (const v of PHOTO.mask) m += v; localStorage.setItem('aquarell-photo', JSON.stringify({ mask: m, img: PHOTO.img.toDataURL('image/png') })); }
+  catch (e) { toast('Bild ist zu groß zum Merken – spielbar bis zum Neuladen'); }
+}
+function loadPhoto() {
+  try {
+    const j = JSON.parse(localStorage.getItem('aquarell-photo') || 'null'); if (!j) return;
+    const mask = new Uint8Array(N); for (let i = 0; i < N; i++) mask[i] = j.mask.charCodeAt(i) === 49 ? 1 : 0;
+    const im = new Image(); im.onload = () => { const c = mk(im.width, im.height); c.getContext('2d').drawImage(im, 0, 0);
+      PHOTO = { mask, img: c, cups: findCups(mask) }; buildLevelButtons(); if (levelNo === PHOTO_LEVEL) setLevel(PHOTO_LEVEL, true); };
+    im.src = j.img;
+  } catch (e) {}
+}
+document.getElementById('photoBtn').onclick = () => document.getElementById('photoIn').click();
+document.getElementById('photoIn').onchange = e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  toast('Bild wird gelesen …');
+  const url = URL.createObjectURL(f), im = new Image();
+  im.onload = () => { URL.revokeObjectURL(url);
+    PHOTO = processPhoto(im); savePhoto(); buildLevelButtons(); setLevel(PHOTO_LEVEL, true); closeMenu();
+    toast(PHOTO.cups.length ? `Dein Bild! ${PHOTO.cups.length} Mulden zum Füllen` : 'Dein Bild! Keine Mulden gefunden – einfach malen'); };
+  im.onerror = () => toast('Bild ließ sich nicht öffnen');
+  im.src = url; e.target.value = '';
+};
+loadPhoto();
+
 // ---------- Grafikqualität ----------
 // Fein = 6 Pixel pro Zelle, Schnell = 3 (etwa 3× schneller beim Zeichnen). Auto beginnt fein und schaltet um,
 // wenn das Gerät spürbar ruckelt; Fire-Tablets und schwache Geräte starten gleich schnell.
