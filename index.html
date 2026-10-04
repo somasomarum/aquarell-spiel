@@ -121,6 +121,7 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
       <div class="row"><span>Zähigkeit</span><div class="visc"><small>Wasser</small><input type="range" id="visc" min="0" max="4" step="0.05" value="2.1" aria-label="Zähigkeit: Wasser bis Honig"><small>Honig</small></div></div>
       <div class="row"><span>Wasser</span><button id="fluidBtn" aria-pressed="true" title="Wasser mit Druck: ebene Oberflächen, steigt in U-Formen nach (W)">Wasser: flüssig</button></div>
       <div class="row" id="tiltRow" hidden><span>Handy neigen</span><button id="tiltBtn" aria-pressed="false" title="iPhone/Handy neigen statt ziehen">Neigen</button></div>
+      <div class="row"><span>Grafik</span><div class="levels" id="gfx"></div></div>
       <div class="row"><span>Unbegrenzt Wasser, Tinte, Radierer</span><button id="zen" aria-pressed="false" title="Kindermodus: unbegrenzt Wasser, Tinte und Radierer">Kindermodus</button></div>
       <div class="row"><span>Blatt neu beginnen</span><button id="restart" title="Blatt neu beginnen">Neu</button></div>
       <p class="keys">Ziehen oder Mausrad dreht das Blatt. Tasten: Q/E drehen · D Drehen · P Stift · R Radierer · Z zurück · W Wasser</p>
@@ -132,12 +133,13 @@ h1 span{color:var(--blau);filter:brightness(1.4)}
 (() => {
 // ---------- Version ----------
 // Bei jeder spielbaren Änderung hochzählen und in README.md (Versionen) eintragen. __BUILD__ ersetzt tools/pages.sh durch den Commit.
-const VERSION = '0.16', VERSION_NOTE = 'Für Kinder: Startknopf, Kindermodus, Jubel bei fertigen Formen', BUILD = 'ef206f0';
+const VERSION = '0.17', VERSION_NOTE = 'Wasser als Aquarell-Lasur, Grafik Auto/Fein/Schnell', BUILD = '3939f16';
 { const v = document.getElementById('ver'); v.textContent = 'v' + VERSION + (BUILD.startsWith('__') ? '' : ' · ' + BUILD);
   v.title = 'Neu in v' + VERSION + ': ' + VERSION_NOTE; }
 
 // ---------- Raster ----------
-const W = 150, H = 210, N = W * H, R = 6;          // Zellen, Pixel pro Zelle
+const W = 150, H = 210, N = W * H;
+let R = 6;                                           // Pixel pro Zelle: 6 = fein, 3 = schnell (setQuality)
 const wall = new Uint8Array(N), water = new Uint8Array(N);
 const pa = new Float32Array(N * 3);                  // Pigment (Absorbanz) pro Wasserzelle
 const stain = new Float32Array(N * 3);               // Pigment im Papier
@@ -145,6 +147,7 @@ const wet = new Float32Array(N);                     // wie nass das Papier gera
 const gran = new Float32Array(N);                    // Papierkorn: manche Stellen nehmen mehr Farbe an
 for (let i = 0; i < N; i++) gran[i] = .82 + Math.random() * .36;
 const sumBuf = new Float32Array(N), blurBuf = new Float32Array(N), tmpBuf = new Float32Array(N);
+const wnoise = new Float32Array(N);                  // ruhiges Rauschen für unregelmäßige Wasserränder (einmal berechnet)
 const moved = new Uint32Array(N);
 const mom = new Int8Array(N);                        // Schwung beim seitlichen Rutschen: −1/+1, 0 = liegt ruhig
 const drift = new Float32Array(N);                   // je Wassertropfen: aufgelaufener Schräganteil (wie Bresenham), damit schräge Strahlen zusammenbleiben
@@ -306,21 +309,28 @@ function setGravity() {
 
 // ---------- Canvas ----------
 const cv = document.getElementById('paper'), ctx = cv.getContext('2d');
-cv.width = W * R; cv.height = H * R;
+
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
-const paperC = mk(W * R, H * R), wallC = mk(W * R, H * R), stainC = mk(W, H), waterC = mk(W, H);
-const wctx = wallC.getContext('2d'), sctx = stainC.getContext('2d'), qctx = waterC.getContext('2d');
+const stainC = mk(W, H), waterC = mk(W, H), sctx = stainC.getContext('2d'), qctx = waterC.getContext('2d');
+let paperC, wallC, wctx;   // hängen von R ab, siehe initCanvases()
 const sImg = sctx.createImageData(W, H), qImg = qctx.createImageData(W, H);
 
-(function paper() {
+
+const grain = (() => { const c = mk(96, 96), x = c.getContext('2d'), id = x.createImageData(96, 96);
+  for (let i = 0; i < id.data.length; i += 4) { id.data[i + 3] = Math.random() < .35 ? 90 + Math.random() * 165 : 0; }
+  x.putImageData(id, 0, 0); return c; })();
+function makePaper() {
   const p = paperC.getContext('2d'); p.fillStyle = '#f7f4ee'; p.fillRect(0, 0, W * R, H * R);
   const id = p.getImageData(0, 0, W * R, H * R), d = id.data;
   for (let i = 0; i < d.length; i += 4) { const v = (Math.random() - .5) * 10; d[i] += v; d[i + 1] += v; d[i + 2] += v - 1; }
   p.putImageData(id, 0, 0);
-})();
-const grain = (() => { const c = mk(96, 96), x = c.getContext('2d'), id = x.createImageData(96, 96);
-  for (let i = 0; i < id.data.length; i += 4) { id.data[i + 3] = Math.random() < .35 ? 90 + Math.random() * 165 : 0; }
-  x.putImageData(id, 0, 0); return c; })();
+}
+// Alle Ebenen in voller Auflösung neu anlegen (beim Start und wenn die Grafikqualität wechselt).
+function initCanvases() {
+  cv.width = W * R; cv.height = H * R;
+  paperC = mk(W * R, H * R); wallC = mk(W * R, H * R); wctx = wallC.getContext('2d');
+  makePaper(); initHatch();
+}
 
 function crayonPath(pts, color, width) {
   wctx.save(); wctx.lineCap = 'round'; wctx.lineJoin = 'round'; wctx.strokeStyle = color;
@@ -588,13 +598,19 @@ function boxBlur(src, dst, r) {
       acc += tmpBuf[Math.min(H - 1, y + r + 1) * W + x] - tmpBuf[Math.max(0, y - r) * W + x]; } }
 }
 const FILTER = typeof ctx.filter === 'string';
+// Rauschfeld für die Wasserränder: geglättetes Zufallsmuster 0..1
+{ const r = new Float32Array(N); for (let i = 0; i < N; i++) r[i] = Math.random(); boxBlur(r, wnoise, 2);
+  let lo = 1, hi = 0; for (const v of wnoise) { lo = Math.min(lo, v); hi = Math.max(hi, v); } for (let i = 0; i < N; i++) wnoise[i] = (wnoise[i] - lo) / (hi - lo); }
 // Weichzeichnen auf kleinen Zwischen-Canvases (2 px pro Zelle), dann weich hochskalieren: billig auch auf dem Handy.
 const M = 2, midS = mk(W * M, H * M), midQ = mk(W * M, H * M), mS = midS.getContext('2d'), mQ = midQ.getContext('2d');
 function soft(dst, src, px) {
   dst.clearRect(0, 0, W * M, H * M); dst.imageSmoothingEnabled = true;
-  if (FILTER) dst.filter = `blur(${px}px)`;
+  if (FILTER && R > 3) dst.filter = `blur(${px}px)`;   // im Schnell-Modus ohne Filter
   dst.drawImage(src, 0, 0, W * M, H * M);
-  if (FILTER) dst.filter = 'none';
+  if (!(FILTER && R > 3)) {   // ohne Filter: billig weichzeichnen durch versetzt übereinander gelegte Kopien
+    dst.globalAlpha = .35; for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) dst.drawImage(src, ox, oy, W * M, H * M); dst.globalAlpha = 1;
+  }
+  if (FILTER && R > 3) dst.filter = 'none';
 }
 function render() {
   const sd = sImg.data, qd = qImg.data;
@@ -608,21 +624,23 @@ function render() {
     const s = sumBuf[i], edge = s > .02 ? Math.max(0, s - blurBuf[i]) / (s + .15) : 0;
     const f = .6 * gran[i] * (1 + 1.1 * edge), w = 1 - .08 * wet[i];
     sd[o] = 255 * Math.exp(-stain[b] * f) * w; sd[o + 1] = 255 * Math.exp(-stain[b + 1] * f) * w; sd[o + 2] = 255 * Math.exp(-stain[b + 2] * f) * (1 - .05 * wet[i]); sd[o + 3] = 255;
-    const dn = qWb[i];
-    if (dn > .2) {
-      const a = Math.min(1, (dn - .2) / .3), k = .6 / dn, rim = 1 - .22 * (1 - a);   // Rand etwas dunkler, wie eine Wasserkante
-      qd[o] = 255 * Math.exp(-qPb[0][i] * k) * rim; qd[o + 1] = 255 * Math.exp(-qPb[1][i] * k) * rim; qd[o + 2] = 255 * Math.exp(-qPb[2][i] * k) * rim;
-      qd[o + 3] = 215 * a * a * (3 - 2 * a);
+    // Wasser als nasse Farblasur: unregelmäßiger Rand (Rauschen in der Schwelle), Pigment sammelt sich dunkel am Rand,
+    // innen körnig wie das Papier. Wird per Multiplizieren aufs Papier gelegt, nicht deckend.
+    const dn = qWb[i], nz = wnoise[i], th = .12 + .24 * nz;
+    if (dn > th) {
+      const a = Math.min(1, (dn - th) / .32), edge = 4 * a * (1 - a);
+      const k = .3 / dn * gran[i] * (.75 + .5 * nz) * (1 + 2.2 * edge * edge);   // heller, ungleichmäßig, kräftiger Pigmentrand
+      qd[o] = 255 * Math.exp(-qPb[0][i] * k); qd[o + 1] = 255 * Math.exp(-qPb[1][i] * k); qd[o + 2] = 255 * Math.exp(-qPb[2][i] * k);
+      qd[o + 3] = 255 * Math.min(1, a * 1.6);
     } else qd[o + 3] = 0;
   }
   sctx.putImageData(sImg, 0, 0); qctx.putImageData(qImg, 0, 0);
   ctx.globalCompositeOperation = 'source-over'; ctx.drawImage(paperC, 0, 0);
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  soft(mS, stainC, 1.4); soft(mQ, waterC, 1.1);
+  soft(mS, stainC, 1.4); soft(mQ, waterC, .8);
   ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(midS, 0, 0, cv.width, cv.height);
   ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = .8; ctx.drawImage(midQ, 0, 0, cv.width, cv.height);
-  ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = .18; ctx.drawImage(midQ, -R * .6, -R * .6, cv.width, cv.height);   // Glanzkante oben links
+  ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = .95; ctx.drawImage(midQ, 0, 0, cv.width, cv.height);   // Lasur, kein Glanz
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
   drawHatch();
@@ -631,9 +649,14 @@ function render() {
   drawFunnels();
 }
 // Bleistift-Schraffur auf Zielflächen, wo noch Farbe fehlt (aus progress() aktualisiert). Antippen der Punkte lässt sie aufleuchten.
-const hatchMask = mk(W, H), hmx = hatchMask.getContext('2d'), hImg = hmx.createImageData(W, H), hatchC = mk(W * R, H * R), hcx = hatchC.getContext('2d');
-const hatchPat = (() => { const c = mk(12, 12), x = c.getContext('2d'); x.strokeStyle = '#4a4450'; x.lineWidth = 1.6; x.lineCap = 'round';
-  x.beginPath(); x.moveTo(-2, 14); x.lineTo(14, -2); x.moveTo(-2, 2); x.lineTo(2, -2); x.moveTo(10, 14); x.lineTo(14, 10); x.stroke(); return hcx.createPattern(c, 'repeat'); })();
+const hatchMask = mk(W, H), hmx = hatchMask.getContext('2d'), hImg = hmx.createImageData(W, H);
+let hatchC, hcx, hatchPat;
+function initHatch() {
+  hatchC = mk(W * R, H * R); hcx = hatchC.getContext('2d');
+  const c = mk(12, 12), x = c.getContext('2d'); x.strokeStyle = '#4a4450'; x.lineWidth = 1.6; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(-2, 14); x.lineTo(14, -2); x.moveTo(-2, 2); x.lineTo(2, -2); x.moveTo(10, 14); x.lineTo(14, 10); x.stroke();
+  hatchPat = hcx.createPattern(c, 'repeat');
+}
 let hatchFlash = 0;
 function updateHatch() {
   const d = hImg.data; d.fill(0);
@@ -955,12 +978,34 @@ addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (['q', 'e', '
 
 // ---------- Loop ----------
 let frame = 0;
-function loop() {
+function loop(t) {
+  watchSpeed(t);
   if (started) simFrame();
   dry(); if (frame % 3 === 0) bleed();
   render(); drawFx();
   if (++frame % 20 === 0) progress();
   requestAnimationFrame(loop);
+}
+// ---------- Grafikqualität ----------
+// Fein = 6 Pixel pro Zelle, Schnell = 3 (etwa 3× schneller beim Zeichnen). Auto beginnt fein und schaltet um,
+// wenn das Gerät spürbar ruckelt; Fire-Tablets und schwache Geräte starten gleich schnell.
+let quality = 'auto', lowAuto = /Silk|KF[A-Z]{2,4}\b/.test(navigator.userAgent) || ((navigator.hardwareConcurrency || 8) <= 4 && navigator.maxTouchPoints > 0);
+try { quality = localStorage.getItem('aquarell-gfx') || 'auto'; } catch (e) {}
+function applyQuality() {
+  const r = quality === 'schnell' || (quality === 'auto' && lowAuto) ? 3 : 6;
+  document.querySelectorAll('#gfx button').forEach(b => b.setAttribute('aria-pressed', b.dataset.q === quality));
+  if (r === R && wctx) return;
+  R = r; initCanvases(); if (LEVEL) { rebuildWalls(); updateHatch(); }
+}
+[['auto', 'Auto'], ['fein', 'Fein'], ['schnell', 'Schnell']].forEach(([q, t]) => { const b = document.createElement('button'); b.textContent = t; b.dataset.q = q;
+  b.onclick = () => { quality = q; try { localStorage.setItem('aquarell-gfx', q); } catch (e) {} applyQuality(); toast('Grafik: ' + t); }; document.getElementById('gfx').appendChild(b); });
+applyQuality();
+let fpsT = 0, fpsN = 0, fpsSum = 0;
+function watchSpeed(t) {   // im Auto-Modus: nach dem Start ~2 s messen, bei unter ~30 Bildern/s auf schnell
+  if (!started || quality !== 'auto' || lowAuto) return;
+  if (fpsT) { fpsSum += t - fpsT; fpsN++; }
+  fpsT = t;
+  if (fpsN === 120) { if (fpsSum / fpsN > 33) { lowAuto = true; applyQuality(); toast('Grafik auf schnell gestellt'); } fpsN = 999; }
 }
 { let k = 1; try { const v = localStorage.getItem('aquarell-level'); if (v !== null) k = +v; } catch (e) {} setLevel(k, true); showZen(); }   // erster Besuch: Level 2 (am leichtesten)
 // Startbildschirm: ein großer Knopf, der am Tablet gleich das Neigen einschaltet (iOS braucht dafür einen Fingertipp)
